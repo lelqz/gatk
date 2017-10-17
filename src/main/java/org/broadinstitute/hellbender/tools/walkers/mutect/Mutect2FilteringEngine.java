@@ -3,11 +3,18 @@ package org.broadinstitute.hellbender.tools.walkers.mutect;
 import htsjdk.variant.variantcontext.Genotype;
 import htsjdk.variant.variantcontext.VariantContext;
 import htsjdk.variant.vcf.VCFConstants;
+import org.broadinstitute.hellbender.exceptions.UserException;
 import org.broadinstitute.hellbender.tools.walkers.annotator.*;
 import org.broadinstitute.hellbender.tools.walkers.contamination.ContaminationRecord;
+import org.broadinstitute.hellbender.tools.walkers.readorientation.Hyperparameters;
+import org.broadinstitute.hellbender.tools.walkers.readorientation.LearnHyperparametersEngine;
+import org.broadinstitute.hellbender.tools.walkers.readorientation.LearnHyperparametersEngine.State;
 import org.broadinstitute.hellbender.utils.GATKProtectedVariantContextUtils;
 import org.broadinstitute.hellbender.utils.MathUtils;
 import org.broadinstitute.hellbender.utils.variant.GATKVCFConstants;
+import org.broadinstitute.hellbender.utils.Nucleotide;
+import org.broadinstitute.hellbender.utils.Utils;
+
 import java.util.*;
 
 /**
@@ -25,7 +32,6 @@ public class Mutect2FilteringEngine {
         contamination = MTFAC.contaminationTable == null ? 0.0 : ContaminationRecord.readFromFile(MTFAC.contaminationTable).get(0).getContamination();
         this.tumorSample = tumorSample;
         somaticPriorProb = Math.pow(10, MTFAC.log10PriorProbOfSomaticEvent);
-        hyperparametersForReadOrientaitonModel = Hyperparameters.readHyperparameters(MTFAC.hyperparameterTable);
     }
 
     private void applyContaminationFilter(final M2FiltersArgumentCollection MTFAC, final VariantContext vc, final Collection<String> filters) {
@@ -168,9 +174,9 @@ public class Mutect2FilteringEngine {
     private void applyStrandArtifactFilter(final M2FiltersArgumentCollection MTFAC, final VariantContext vc, final Collection<String> filters) {
         Genotype tumorGenotype = vc.getGenotype(tumorSample);
         final double[] posteriorProbabilities = GATKProtectedVariantContextUtils.getAttributeAsDoubleArray(
-                tumorGenotype, (StrandArtifact.POSTERIOR_PROBABILITIES_KEY), () -> null, -1);
+                tumorGenotype, (GATKVCFConstants.POSTERIOR_PROBABILITIES_KEY), () -> null, -1);
         final double[] mapAlleleFractionEstimates = GATKProtectedVariantContextUtils.getAttributeAsDoubleArray(
-                tumorGenotype, (StrandArtifact.MAP_ALLELE_FRACTIONS_KEY), () -> null, -1);
+                tumorGenotype, (GATKVCFConstants.MAP_ALLELE_FRACTIONS_KEY), () -> null, -1);
 
         if (posteriorProbabilities == null || mapAlleleFractionEstimates == null){
             return;
@@ -211,6 +217,29 @@ public class Mutect2FilteringEngine {
         }
     }
 
+    /***
+     * This filter requires the INFO field annotation {@code REFERENCE_CONTEXT_KEY} and {@code F1R2_KEY}
+     */
+    private void applyReadOrientationFilter(final M2FiltersArgumentCollection MTFAC, final VariantContext vc, final Collection<String> filters){
+        final Genotype tumorGenotype = vc.getGenotype(tumorSample);
+        if (! vc.isSNP()){
+            return;
+        }
+
+        if (! tumorGenotype.hasExtendedAttribute(GATKVCFConstants.READ_ORIENTATION_POSTERIOR_KEY)){
+            return;
+        }
+
+        final double[] posteriorProbabilities = GATKProtectedVariantContextUtils.getAttributeAsDoubleArray(
+                tumorGenotype, GATKVCFConstants.READ_ORIENTATION_POSTERIOR_KEY, () -> null, -1.0);
+        final double probOfF1R2Artifact = posteriorProbabilities[ReadOrientationArtifact.INDEX_OF_F1R2_ARTIFACT];
+        final double probOfF2R1Artifact = posteriorProbabilities[ReadOrientationArtifact.INDEX_OF_F2R1_ARTIFACT];
+
+        if (probOfF1R2Artifact > MTFAC.readOrientationFilterThreshold || probOfF2R1Artifact > MTFAC.readOrientationFilterThreshold){
+            filters.add(GATKVCFConstants.READ_ORIENTATION_FILTER_NAME);
+        }
+    }
+
     //TODO: building a list via repeated side effects is ugly
     public Set<String> calculateFilters(final M2FiltersArgumentCollection MTFAC, final VariantContext vc) {
         final Set<String> filters = new HashSet<>();
@@ -228,6 +257,7 @@ public class Mutect2FilteringEngine {
         applyMedianMappingQualityDifferenceFilter(MTFAC, vc, filters);
         applyMedianFragmentLengthDifferenceFilter(MTFAC, vc, filters);
         applyReadPositionFilter(MTFAC, vc, filters);
+        applyReadOrientationFilter(MTFAC, vc, filters);
 
         return filters;
     }

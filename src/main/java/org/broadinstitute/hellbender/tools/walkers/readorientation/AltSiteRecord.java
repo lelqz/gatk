@@ -19,6 +19,8 @@ import java.util.List;
  * Created by tsato on 10/11/17.
  */
 public class AltSiteRecord {
+    private String contig;
+    private int position;
     private String referenceContext;
     private int[] baseCounts;
     private int[] f1r2Counts;
@@ -26,7 +28,10 @@ public class AltSiteRecord {
     private Nucleotide altAllele;
 
 
-    public AltSiteRecord(final String referenceContext, final int[] baseCounts, final int[] f1r2Counts, final int depth, final Nucleotide altAllele){
+    public AltSiteRecord(final String contig, final int position, final String referenceContext, final int[] baseCounts,
+                         final int[] f1r2Counts, final int depth, final Nucleotide altAllele){
+        this.contig = contig;
+        this.position = position;
         this.referenceContext = referenceContext;
         this.baseCounts = baseCounts;
         this.f1r2Counts = f1r2Counts;
@@ -34,9 +39,17 @@ public class AltSiteRecord {
         this.altAllele = altAllele;
     }
 
+    public String getContig(){ return contig; }
+
+    public int getPosition(){ return position; }
+
     public String getReferenceContext(){ return referenceContext; }
 
     public int[] getBaseCounts(){ return baseCounts; }
+
+    public int getAltCount() {
+        return baseCounts[altAllele.ordinal()];
+    }
 
     public int[] getF1R2Counts(){ return f1r2Counts; }
 
@@ -47,6 +60,8 @@ public class AltSiteRecord {
 
     /*** Table IO code ***/
     private enum AltSiteRecordTableColumn {
+        CONTIG("contig"),
+        POSITION("position"),
         CONTEXT("context"),
         BASE_COUNTS("base-counts"),
         F1R2_COUNTS("f1r2-counts"),
@@ -79,7 +94,9 @@ public class AltSiteRecord {
             // it'd be nice to set() less manually...
             // Note that allele fraction f is not allele-specific, thus the same f array will be printed
             // four times for each context
-            dataLine.set(AltSiteRecordTableColumn.CONTEXT.toString(), record.getReferenceContext())
+            dataLine.set(AltSiteRecordTableColumn.CONTIG.toString(), record.getContig())
+                    .set(AltSiteRecordTableColumn.POSITION.toString(), record.getPosition())
+                    .set(AltSiteRecordTableColumn.CONTEXT.toString(), record.getReferenceContext())
                     .set(AltSiteRecordTableColumn.BASE_COUNTS.toString(), Ints.join(",", record.getBaseCounts()))
                     .set(AltSiteRecordTableColumn.F1R2_COUNTS.toString(), Ints.join(",", record.getF1R2Counts()))
                     .set(AltSiteRecordTableColumn.DEPTH.toString(), record.getDepth())
@@ -95,14 +112,17 @@ public class AltSiteRecord {
 
         @Override
         protected AltSiteRecord createRecord(final DataLine dataLine) {
-            final String referenceContext = dataLine.get(AltSiteRecord.AltSiteRecordTableColumn.CONTEXT);
+            final String contig = dataLine.get(AltSiteRecordTableColumn.CONTIG);
+            final int position = Integer.valueOf(dataLine.get(AltSiteRecordTableColumn.POSITION));
+            final String referenceContext = dataLine.get(AltSiteRecordTableColumn.CONTEXT);
+            // TODO: eventually split basecounts into ref and alt counts
             final int[] baseCounts = Arrays.stream(dataLine.get(AltSiteRecordTableColumn.BASE_COUNTS).split(","))
                     .mapToInt(Integer::parseInt).toArray();
             final int[] f1r2Counts = Arrays.stream(dataLine.get(AltSiteRecordTableColumn.F1R2_COUNTS).split(","))
                     .mapToInt(Integer::parseInt).toArray();
             final int depth = Integer.parseInt(dataLine.get(AltSiteRecordTableColumn.DEPTH));
             final Nucleotide altAllele = Nucleotide.valueOf(dataLine.get(AltSiteRecordTableColumn.ALT_ALLELE));
-            return new AltSiteRecord(referenceContext, baseCounts, f1r2Counts, depth, altAllele);
+            return new AltSiteRecord(contig, position, referenceContext, baseCounts, f1r2Counts, depth, altAllele);
         }
     }
 
