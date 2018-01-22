@@ -157,66 +157,58 @@ Adding Eqs \ref{first_term}, \ref{second_term}, and \ref{third_term} and noting 
 We now have the model evidence for allele subset $\mathbb{A}$.  This lets us choose which alleles are true somatic variants.  It also lets us make calls on somatic loss of heterozygosity events.  Furthermore, instead of reporting max-likelihood allele fractions as before, we may emit the parameters of the Dirichlet posterior $q(\vf)$, which encode both the maximum likelihood allele fractions and their uncertainty.
 
 \section{Strand Artifact Model}
+
 \begin{figure}
 \centering
 \includegraphics[width=0.3\textwidth]{strand_artifact_pgm.png}
-\caption{\label{fig:frog}The probabilistic graphical model}
+\caption{\label{fig:strand artifact}The probabilistic graphical model for the Strand Artifact model}
 \end{figure}
 
-\begin{itemize}
-	\item $\vz$ is a latent random variable having a 1-of-K representation. For each variant locus, $\vz$ encodes the presence of strand artifact in forward reads ($[1, 0, 0]$), artifact in reverse reads ($[0, 1, 0]$), or no artifact ($[0, 0, 1]$)
-	\item $f \sim \text{Unif}(0, 1)$ is a prior distribution over alt allele fraction $f$
-	\item $\epsilon \sim \text{Beta}(\alpha, \beta)$ is a prior distribution over the error probability on a read on the artifact strand. For instance, if we have strand artifact on the reverse strand (i.e. $z = [0, 1, 0]$), $\epsilon$ is the probability that the sequencer reads a ref allele on a reverse read as alt
-	\item $x^+ | f, \epsilon, z$ is the number of forward reads with the alt allele. It's a mixture of binomials, defined as follows:
-	\begin{equation}
-	x^+ | f, \epsilon, z \sim
-		\begin{cases}
-			\text{Bin} (n^+, f + \epsilon(1-f)) & z = \mathrm{Art+}\\
-			 \text{Bin} (n^+, f) 			& z = \mathrm{Art-} \\
-			 \text{Bin} (n^+, f)			& z = \mathrm{noArt}
-		\end{cases}
-	\end{equation}
-\end{itemize}
+The strand artifact filter detects sequencing artifact in which the evidence for the alt allele consists entirely of forward reads alone or reverse reads alone. We must detect this while taking into account the fact that at some loci, such as near the end of an exome target, \emph{all} reads are biased towards one direction, and thus the bias towards one read direction among the alt is not suspect.
 
+Let $z$ be a discrete latent random variable that represents the artifact state of a suspected variant, where $z \in \{ \text{Artifact Forward}, \text{Artifact Reverse}, \text{No Artifact} \}$. At each locus, the distributions over forward alt reads $x^+$ and reverse alt reads $x^-$, conditional on the artifact state $z$ as well as the allele fraction $f$ and artifact allele fraction $\epsilon$, are binomial random variables . Artifactual allele fraction $\epsilon$ is the probability that we mistakenly read a ref allele as alt due to a strand artifact error. We give the flat prior over $f$ and a beta prior over $\epsilon$. We define the conditional probability of $x^+$ as
 
+\begin{equation}
+P(x^+ | f, \epsilon, z) =
+\begin{cases}
+\text{Bin} (x^+ | n^+, f + \epsilon(1-f)) & z = \text{Artifact Forward}\\
+\text{Bin} (x^+ | n^+, f) 			& z = \text{Artifact Reverse or No Artifact}\\
+\end{cases}
+\end{equation}
 
-We compute the conditional distributions of $x^-$  analogously.
+The conditional distributions of $x^-$ is defined analogously.
 
-Having observed the read counts in the forward and reverse directions, we can compute the posterior probabilities of the latent variable $z$.  Below we derive the unnormalized posterior probability of strand artifact in forward reads ($z = art+$), given that we observed $x^+$ forward alt reads and $x^-$ reverse alt reads. We use a shorthand $z_0$ to denote $z=art+$ for conciseness. 
+In order to assess whether a variant should be filtered, we compute the posterior probabilities of the artifact states $z$ given the observed alt read counts $X = \{ x^+, x^- \}$.  We compute the likelihood function $P(X | z)$ by marginalizing the latent variables $f$ and $\epsilon$ out of the joint distribution $P(X, f, \epsilon | z)$, and we do this for each of the three possible values of $z$ separately. First consider the case where $z = \text{Artifact Forward}$, which we denote by the shorthand $z^+$ below. The likelihood $P(X | z^+ )$ is
 
-First we will derive the likelihood $p(x^+, x^-, f, \epsilon | z_0)$
 \begin{align}
-p(x^+, x^- | z_0)  &= \iint_{f, \epsilon}  p(x^+, x^-, f, \epsilon | z_0) \,df\,d\epsilon \\
-			  &= \iint_{f, \epsilon}  p(f) p(\epsilon) p(x^+, x^- | z_0, f, \epsilon) \,df\,d\epsilon \\
-			  &= \iint_{f, \epsilon}  p(f) p(\epsilon) p(x^+ | z_0, f, \epsilon) p(x^- | z_0, f, \epsilon) \,df\,d\epsilon \\
-			  &= \iint_{f, \epsilon}  p(\epsilon) p(x^+ | z_0, f, \epsilon) p(x^- | z_0, f, \epsilon) \,df\,d\epsilon \label{watershed} \\
+P(X | z^+ )  &= \iint_{f, \epsilon}  P(X, f, \epsilon | z^+) \,df\,d\epsilon \nonumber \\
+			  &= \iint_{f, \epsilon}  P(f) p(\epsilon) P(X | z^+, f, \epsilon) \,df\,d\epsilon \nonumber \\
+			  &= \iint_{f, \epsilon}  P(f) p(\epsilon) p(x^+ | z^+, f, \epsilon) p(x^- | z^+, f, \epsilon) \,df\,d\epsilon \nonumber \\
+			  &= \iint_{f, \epsilon}  P(\epsilon) p(x^+ | z^+, f, \epsilon) p(x^- | z^+, f, \epsilon) \,df\,d\epsilon \label{watershed} \\
 			  &= \iint_{f, \epsilon}  \mathrm{Beta}(\epsilon|\alpha, \beta) \mathrm{Bin}(x^+ | f + \epsilon(1-f), n^+) \mathrm{Bin}(x^- | f, n^-) \,df\,d\epsilon
 \end{align}
 
-The posterior probability of strand artifact in forward reads is therefore
+where $\alpha$ and $\beta$ are fixed hyperparameters to the beta prior over $\epsilon$. By Bayes Rule the posterior probability of strand bias for forward reads is therefore
 
 \begin{align}
-p(z_0 |x^+, x^-) & \propto p(z_0) p(x^+, x^- | z_0) \\
-			 & = p(z_0) \iint_{f, \epsilon}  \mathrm{Beta}(\epsilon|\alpha, \beta) \mathrm{Bin}(x^+ | f + \epsilon(1-f), n^+) \mathrm{Bin}(x^- | f, n^-) \,df\,d\epsilon
+P(z^+ | X) & \propto P(z^+) P(X | z^+) = \pi_+ P(X | z^+) 
 \end{align}
 
-The derivation for the probability of strand artifact on reverse strand is analogous.
-
-For the case of no strand artifact, the derivation of likelihoods is identical up to (\ref{watershed}). Here we can simply the equation to a single integral over $f$ because the conditional probabilities of $x^+$ and $x^-$ do not depend on $\epsilon$. We use a shorthand $z_2$ for $z=\mathrm{noArt}$
+where $\pi_+ = P(z^+)$ is a fixed prior probability of strand artifact. The probability of reverse strand artifact, $P(z^- | X)$, may be derived analogously. The derivation of the the posterior probability of no artifact is identical up to (\ref{watershed}). The integral then simplifies because the conditional probabilities of $x^+$ and $x^-$ do not depend on $\epsilon$. Using a shorthand $z_o$ for $z= \text{No Artifact}$, we get
 
 \begin{align}
-p(x^+, x^- | z_2)  &= \iint_{f, \epsilon}  p(\epsilon) p(x^+ | z_2, f, \epsilon) p(x^- | z_2, f, \epsilon) \,df\,d\epsilon \nonumber \\
-			  &= \int_{f}  p(x^+ | z_2, f) p(x^- | z_2, f) \,df \int_{\epsilon}  p(\epsilon) d\epsilon \\
+P(X | z_o)  &= \iint_{f, \epsilon}  p(\epsilon) P(x^+ | z_o, f, \epsilon) P(x^- | z_o, f, \epsilon) \,df\,d\epsilon \nonumber \\
+			  &= \int_{f}  P(x^+ | z_o, f) P(x^- | z_o, f) \,df \int_{\epsilon}  P(\epsilon) d\epsilon \\
 			  &= \int_{f}  \mathrm{Bin}(x^+ | f, n^+) \mathrm{Bin}(x^- | f, n^-) \,df
 \end{align}
 
 And the posterior probability is
 
-\begin{align}
-p(z_2 |x^+, x^-) & \propto p(z_2) p(x^+, x^- | z_2) \\
-                         & = p(z_2) \int_{f}  \mathrm{Bin}(x^+ | f, n^+) \mathrm{Bin}(x^- | f, n^-) \,df
-\end{align}
+\begin{equation}
+P(z_o | X) \propto P(z_o) P(X | z_o) =  \pi_o P(X | z_o) 
+\end{equation}
 
+where $\pi_o = P(z = \text{No Artifact})$ is the fixed prior probability of no artifact. We normalize the posteriors and filter the variant if the posterior probability of the forward or the reverse strand artifact exceeds the pre-determined threshold.
 
 \section{Germline Filter}\label{germline-filter}
 Suppose we have detected an allele such that its (somatic) likelihood in the tumor is $\ell_t$ and its (diploid) likelihood in the normal is $\ell_n$.  By convention, both of these are relative to a likelihood of $1$ for the allele \textit{not} to be found.  If we have no matched normal, $\ell_n = 1$.  Suppose we also have the population allele frequency $f$ of this allele.  Then the prior probability for the normal to be heterozygous or homozygous alt for the allele is $2f(1-f) + f^2$ and the prior probability for the normal genotype not to contain the allele is $(1-f)^2$.  Finally, suppose that the prior for this allele to arise as a somatic variant is $\pi$.
