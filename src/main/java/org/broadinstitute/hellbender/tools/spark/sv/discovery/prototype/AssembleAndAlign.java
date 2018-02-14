@@ -6,6 +6,7 @@ import org.broadinstitute.barclay.argparser.CommandLineProgramProperties;
 import org.broadinstitute.hellbender.cmdline.CommandLineProgram;
 import org.broadinstitute.hellbender.cmdline.StandardArgumentDefinitions;
 import org.broadinstitute.hellbender.cmdline.programgroups.StructuralVariantDiscoveryProgramGroup;
+import org.broadinstitute.hellbender.tools.spark.sv.evidence.FindBreakpointEvidenceSpark;
 import org.broadinstitute.hellbender.tools.spark.sv.utils.*;
 import org.broadinstitute.hellbender.tools.spark.sv.utils.SVFastqUtils.FastqRead;
 import org.broadinstitute.hellbender.tools.spark.utils.HopscotchMultiMap;
@@ -60,10 +61,11 @@ public class AssembleAndAlign extends CommandLineProgram {
             contigIdMap.put(assembly.getContigs().get(id), id);
         }
         for ( final FastqRead read : reads ) {
-            final SortedMap<ReadSpan, Integer> spanMap = new TreeMap<>();
+            final SortedMap<ReadSpan, FindBreakpointEvidenceSpark.IntPair> spanMap = new TreeMap<>();
             final byte[] readBases = trimmedRead(read, minQ);
+            final byte[] readQuals = read.getQuals();
             int readOffset = 0;
-            final Iterator<SVKmer> readItr = new SVKmerizer(read.getBases(), kmerSize, new SVKmerShort());
+            final Iterator<SVKmer> readItr = new SVKmerizer(readBases, kmerSize, new SVKmerShort());
             while ( readItr.hasNext() ) {
                 final SVKmerShort readKmer = (SVKmerShort)readItr.next();
                 final SVKmerShort canonicalReadKmer = readKmer.canonical(kmerSize);
@@ -81,32 +83,41 @@ public class AssembleAndAlign extends CommandLineProgram {
                     final int length =
                             leftSpan + Math.min(readBases.length - readOffset, contigBases.length - contigOffset);
                     final ReadSpan span =
-                            new ReadSpan(readStart, contigStart, length, contigIdMap.get(location.getContig()), isRC);
+                            new ReadSpan(readStart, contigStart, length, readBases.length, contigBases.length, contigIdMap.get(location.getContig()), isRC);
                     if ( spanMap.containsKey(span) ) continue;
                     if ( !isRC ) {
                         int nMismatches = 0;
+                        int qualSum = 0;
                         for ( int idx = 0; idx != length; ++idx ) {
                             if ( readBases[readStart+idx] != contigBases[contigStart+idx] ) {
                                 nMismatches += 1;
+                                qualSum += readQuals[readStart+idx];
                             }
                         }
-                        spanMap.put(span, nMismatches);
+                        spanMap.put(span, new FindBreakpointEvidenceSpark.IntPair(nMismatches, qualSum));
                     } else {
                         int nMismatches = 0;
+                        int qualSum = 0;
                         final int contigRCOffset = contigBases.length - contigStart - 1;
                         for ( int idx = 0; idx != length; ++idx ) {
                             if ( readBases[readStart+idx] != BaseUtils.simpleComplement(contigBases[contigRCOffset-idx]) ) {
                                 nMismatches += 1;
+                                qualSum += readQuals[readStart+idx];
                             }
                         }
-                        spanMap.put(span, nMismatches);
+                        spanMap.put(span, new FindBreakpointEvidenceSpark.IntPair(nMismatches, qualSum));
                     }
                 }
                 readOffset += 1;
             }
             System.out.println(read.getHeader());
-            for ( final Map.Entry<ReadSpan, Integer> entry : spanMap.entrySet() ) {
-                System.out.println(entry.getKey() + " NM:" + entry.getValue());
+            if ( spanMap.isEmpty() ) System.out.println("    /" + readBases.length);
+            for ( final Map.Entry<ReadSpan, FindBreakpointEvidenceSpark.IntPair> entry : spanMap.entrySet() ) {
+                final int nMismatches = entry.getValue().int1();
+                final int qualSum = entry.getValue().int2();
+                if ( qualSum < 1000 ) {
+                    System.out.println("  " + entry.getKey() + " TQ:" + qualSum + " NM:" + nMismatches);
+                }
             }
         }
         return null;
@@ -123,14 +134,18 @@ public class AssembleAndAlign extends CommandLineProgram {
         private final int readStart;
         private final int contigStart;
         private final int length;
+        private final int readLen;
+        private final int contigLen;
         private final int contigId;
         private final boolean isRC;
 
         public ReadSpan( final int readStart, final int contigStart, final int length,
-                         final int contigId, final boolean isRC ) {
+                         final int readLen, final int contigLen, final int contigId, final boolean isRC ) {
             this.readStart = readStart;
             this.contigStart = contigStart;
             this.length = length;
+            this.readLen = readLen;
+            this.contigLen = contigLen;
             this.contigId = contigId;
             this.isRC = isRC;
         }
@@ -165,8 +180,8 @@ public class AssembleAndAlign extends CommandLineProgram {
         }
 
         @Override public String toString() {
-            return readStart + "-" + (readStart + length) + " -> " +
-                    (isRC ? "-" : "+") + contigId + ":" + contigStart + "-" + (contigStart + length);
+            return readStart + "-" + (readStart + length) + "/" + readLen + " -> " +
+                    (isRC ? "-" : "+") + contigId + ":" + contigStart + "-" + (contigStart + length) + "/" + contigLen;
         }
     }
 
