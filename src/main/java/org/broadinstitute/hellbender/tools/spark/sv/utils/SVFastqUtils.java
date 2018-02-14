@@ -26,8 +26,6 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import static htsjdk.samtools.SAMUtils.fastqToPhred;
-
 /**
  * Memory-economical utilities for producing a FASTQ file.
  */
