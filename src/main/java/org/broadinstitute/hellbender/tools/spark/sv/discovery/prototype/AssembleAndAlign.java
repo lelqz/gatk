@@ -6,6 +6,7 @@ import org.broadinstitute.barclay.argparser.CommandLineProgramProperties;
 import org.broadinstitute.hellbender.cmdline.CommandLineProgram;
 import org.broadinstitute.hellbender.cmdline.StandardArgumentDefinitions;
 import org.broadinstitute.hellbender.cmdline.programgroups.StructuralVariantDiscoveryProgramGroup;
+import org.broadinstitute.hellbender.exceptions.UserException;
 import org.broadinstitute.hellbender.tools.spark.sv.evidence.FindBreakpointEvidenceSpark;
 import org.broadinstitute.hellbender.tools.spark.sv.utils.*;
 import org.broadinstitute.hellbender.tools.spark.sv.utils.SVFastqUtils.FastqRead;
@@ -34,6 +35,7 @@ public class AssembleAndAlign extends CommandLineProgram {
     protected Object doWork() {
         final int kmerSize = 31;
         final int minQ = 10;
+        final int maxValidQualSum = 60;
 
         // read the reads
         final List<FastqRead> reads = SVFastqUtils.readFastqFile(fastqFile);
@@ -60,74 +62,104 @@ public class AssembleAndAlign extends CommandLineProgram {
         for ( int id = 0; id != assembly.getNContigs(); ++id ) {
             contigIdMap.put(assembly.getContigs().get(id), id);
         }
-        for ( final FastqRead read : reads ) {
-            final SortedMap<ReadSpan, FindBreakpointEvidenceSpark.IntPair> spanMap = new TreeMap<>();
-            final byte[] readBases = trimmedRead(read, minQ);
-            final byte[] readQuals = read.getQuals();
-            int readOffset = 0;
-            final Iterator<SVKmer> readItr = new SVKmerizer(readBases, kmerSize, new SVKmerShort());
-            while ( readItr.hasNext() ) {
-                final SVKmerShort readKmer = (SVKmerShort)readItr.next();
-                final SVKmerShort canonicalReadKmer = readKmer.canonical(kmerSize);
-                final boolean canonical = readKmer.equals(canonicalReadKmer);
-                final Iterator<KmerLocation> locItr = kmerMap.findEach(canonicalReadKmer);
-                while ( locItr.hasNext() ) {
-                    final ContigLocation location = locItr.next().getLocation();
-                    final byte[] contigBases = location.getContig().getSequence();
-                    final boolean isRC = canonical != location.isCanonical();
-                    final int contigOffset =
-                            isRC ? contigBases.length - location.getOffset() - kmerSize : location.getOffset();
-                    final int leftSpan = Math.min(readOffset, contigOffset);
-                    final int readStart = readOffset - leftSpan;
-                    final int contigStart = contigOffset - leftSpan;
-                    final int length =
-                            leftSpan + Math.min(readBases.length - readOffset, contigBases.length - contigOffset);
-                    final ReadSpan span =
-                            new ReadSpan(readStart, contigStart, length, readBases.length, contigBases.length, contigIdMap.get(location.getContig()), isRC);
-                    if ( spanMap.containsKey(span) ) continue;
-                    if ( !isRC ) {
-                        int nMismatches = 0;
-                        int qualSum = 0;
-                        for ( int idx = 0; idx != length; ++idx ) {
-                            if ( readBases[readStart+idx] != contigBases[contigStart+idx] ) {
-                                nMismatches += 1;
-                                qualSum += readQuals[readStart+idx];
-                            }
-                        }
-                        spanMap.put(span, new FindBreakpointEvidenceSpark.IntPair(nMismatches, qualSum));
-                    } else {
-                        int nMismatches = 0;
-                        int qualSum = 0;
-                        final int contigRCOffset = contigBases.length - contigStart - 1;
-                        for ( int idx = 0; idx != length; ++idx ) {
-                            if ( readBases[readStart+idx] != BaseUtils.simpleComplement(contigBases[contigRCOffset-idx]) ) {
-                                nMismatches += 1;
-                                qualSum += readQuals[readStart+idx];
-                            }
-                        }
-                        spanMap.put(span, new FindBreakpointEvidenceSpark.IntPair(nMismatches, qualSum));
-                    }
-                }
-                readOffset += 1;
+
+        final int nReads = reads.size();
+        if ( (nReads & 1) != 0 ) {
+            throw new UserException("FASTQ input file must have interleaved pairs -- but this file has an odd number of reads.");
+        }
+        for ( int idx = 0; idx < nReads; idx += 2 ) {
+            if ( !Objects.equals(reads.get(idx).getName(), reads.get(idx+1).getName()) ) {
+                throw new UserException("FASTQ input file must have interleaved pairs -- but records " + idx +
+                                        " and " + (idx+1) + " have different names");
             }
-            System.out.println(read.getHeader());
-            if ( spanMap.isEmpty() ) System.out.println("    /" + readBases.length);
-            for ( final Map.Entry<ReadSpan, FindBreakpointEvidenceSpark.IntPair> entry : spanMap.entrySet() ) {
-                final int nMismatches = entry.getValue().int1();
-                final int qualSum = entry.getValue().int2();
-                if ( qualSum < 1000 ) {
-                    System.out.println("  " + entry.getKey() + " TQ:" + qualSum + " NM:" + nMismatches);
-                }
+            final StringBuilder sb = new StringBuilder();
+            String sep = "";
+            for ( final ReadSpan span :
+                    findSpans(reads.get(idx), kmerSize, minQ, maxValidQualSum, kmerMap, contigIdMap).keySet() ) {
+                sb.append(sep).append(span);
+                sep = "; ";
             }
+            sb.append(" | ");
+            sep = "";
+            for (final ReadSpan span :
+                    findSpans(reads.get(idx+1), kmerSize, minQ, maxValidQualSum, kmerMap, contigIdMap).keySet() ) {
+                sb.append(sep).append(span);
+                sep = "; ";
+            }
+            System.out.println(sb);
         }
         return null;
     }
 
-    private byte[] trimmedRead( final FastqRead read, final int minQ ) {
+    private static byte[] trimmedRead( final FastqRead read, final int minQ ) {
         final byte[] quals = read.getQuals();
         final int trimLen =
                 IntStream.range(0, quals.length).filter(idx -> quals[idx] < minQ).findFirst().orElse(quals.length);
         return Arrays.copyOf(read.getBases(), trimLen);
+    }
+
+    private static SortedMap<ReadSpan, FindBreakpointEvidenceSpark.IntPair> findSpans(
+            final FastqRead read,
+            final int kmerSize,
+            final int minQ,
+            final int maxValidQualSum,
+            final HopscotchMultiMap<SVKmerShort, ContigLocation, KmerLocation> kmerMap,
+            final Map<Contig, Integer> contigIdMap ) {
+        final SortedMap<ReadSpan, FindBreakpointEvidenceSpark.IntPair> spanMap = new TreeMap<>();
+        final byte[] readBases = trimmedRead(read, minQ);
+        final byte[] readQuals = read.getQuals();
+        int readOffset = 0;
+        final Iterator<SVKmer> readItr = new SVKmerizer(readBases, kmerSize, new SVKmerShort());
+        while ( readItr.hasNext() ) {
+            final SVKmerShort readKmer = (SVKmerShort)readItr.next();
+            final SVKmerShort canonicalReadKmer = readKmer.canonical(kmerSize);
+            final boolean canonical = readKmer.equals(canonicalReadKmer);
+            final Iterator<KmerLocation> locItr = kmerMap.findEach(canonicalReadKmer);
+            while ( locItr.hasNext() ) {
+                final ContigLocation location = locItr.next().getLocation();
+                final byte[] contigBases = location.getContig().getSequence();
+                final boolean isRC = canonical != location.isCanonical();
+                final int contigOffset =
+                        isRC ? contigBases.length - location.getOffset() - kmerSize : location.getOffset();
+                final int leftSpan = Math.min(readOffset, contigOffset);
+                final int readStart = readOffset - leftSpan;
+                final int contigStart = contigOffset - leftSpan;
+                final int length =
+                        leftSpan + Math.min(readBases.length - readOffset, contigBases.length - contigOffset);
+                final ReadSpan span =
+                        new ReadSpan(readStart, contigStart, length, readBases.length, contigBases.length,
+                                        contigIdMap.get(location.getContig()), isRC);
+                if ( spanMap.containsKey(span) ) continue;
+                if ( !isRC ) {
+                    int nMismatches = 0;
+                    int qualSum = 0;
+                    for ( int idx = 0; idx != length; ++idx ) {
+                        if ( readBases[readStart+idx] != contigBases[contigStart+idx] ) {
+                            nMismatches += 1;
+                            qualSum += readQuals[readStart+idx];
+                        }
+                    }
+                    spanMap.put(span, new FindBreakpointEvidenceSpark.IntPair(nMismatches, qualSum));
+                } else {
+                    int nMismatches = 0;
+                    int qualSum = 0;
+                    final int contigRCOffset = contigBases.length - contigStart - 1;
+                    for ( int idx = 0; idx != length; ++idx ) {
+                        if ( readBases[readStart+idx] != BaseUtils.simpleComplement(contigBases[contigRCOffset-idx]) ) {
+                            nMismatches += 1;
+                            qualSum += readQuals[readStart+idx];
+                        }
+                    }
+                    spanMap.put(span, new FindBreakpointEvidenceSpark.IntPair(nMismatches, qualSum));
+                }
+            }
+            readOffset += 1;
+        }
+        final Iterator<FindBreakpointEvidenceSpark.IntPair> itr = spanMap.values().iterator();
+        while ( itr.hasNext() ) {
+            if ( itr.next().int2() > maxValidQualSum ) itr.remove();
+        }
+        return spanMap;
     }
 
     private static final class ReadSpan implements Comparable<ReadSpan> {
