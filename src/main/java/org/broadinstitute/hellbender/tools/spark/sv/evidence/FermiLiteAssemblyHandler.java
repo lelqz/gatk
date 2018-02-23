@@ -28,13 +28,15 @@ public final class FermiLiteAssemblyHandler implements FindBreakpointEvidenceSpa
     private final int maxFastqSize;
     private final String fastqDir;
     private final boolean writeGFAs;
+    private final boolean popVariantBubbles;
 
     public FermiLiteAssemblyHandler( final String alignerIndexFile, final int maxFastqSize,
-                                     final String fastqDir, final boolean writeGFAs ) {
+                                     final String fastqDir, final boolean writeGFAs, final boolean popVariantBubbles ) {
         this.alignerIndexFile = alignerIndexFile;
         this.maxFastqSize = maxFastqSize;
         this.fastqDir = fastqDir;
         this.writeGFAs = writeGFAs;
+        this.popVariantBubbles = popVariantBubbles;
     }
 
     @Override
@@ -58,8 +60,12 @@ public final class FermiLiteAssemblyHandler implements FindBreakpointEvidenceSpa
         }
 
         // assemble the reads
+        final FermiLiteAssembler assembler = new FermiLiteAssembler();
+        if ( popVariantBubbles ) {
+            assembler.setCleaningFlag(0x60);
+        }
         final long timeStart = System.currentTimeMillis();
-        final FermiLiteAssembly initialAssembly = new FermiLiteAssembler().createAssembly(readsList);
+        final FermiLiteAssembly initialAssembly = assembler.createAssembly(readsList);
         final int secondsInAssembly = (int)((System.currentTimeMillis() - timeStart + 500)/1000);
         if ( initialAssembly.getNContigs() == 0 ) {
             return new AlignedAssemblyOrExcuse(intervalID, "no assembly -- no contigs produced by assembler.");

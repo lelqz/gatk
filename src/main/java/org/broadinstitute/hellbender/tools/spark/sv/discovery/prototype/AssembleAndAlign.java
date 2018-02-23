@@ -41,7 +41,11 @@ public class AssembleAndAlign extends CommandLineProgram {
         final List<FastqRead> reads = SVFastqUtils.readFastqFile(fastqFile);
 
         // assemble them
-        final FermiLiteAssembly assembly = new FermiLiteAssembler().createAssembly(reads);
+        final FermiLiteAssembler assembler = new FermiLiteAssembler();
+        System.out.println("Cleaning flag: " + assembler.getCleaningFlag());
+        assembler.setCleaningFlag((0x20 | assembler.getCleaningFlag()) & ~0x80);
+        System.out.println("Adjusted cleaning flag: " + assembler.getCleaningFlag());
+        final FermiLiteAssembly assembly = assembler.createAssembly(reads);
 
         // make a map of assembled kmers
         final int capacity = assembly.getContigs().stream().mapToInt(tig -> tig.getSequence().length - kmerSize + 1).sum();
@@ -127,7 +131,8 @@ public class AssembleAndAlign extends CommandLineProgram {
                 final int length =
                         leftSpan + Math.min(readBases.length - readOffset, contigBases.length - contigOffset);
                 final ReadSpan span =
-                        new ReadSpan(readStart, contigStart, length, readBases.length, contigBases.length,
+                        new ReadSpan(readStart, isRC ? (contigBases.length - contigStart - length) : contigStart,
+                                        length, readBases.length, contigBases.length,
                                         contigIdMap.get(location.getContig()), isRC);
                 if ( spanMap.containsKey(span) ) continue;
                 if ( !isRC ) {

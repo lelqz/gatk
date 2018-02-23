@@ -172,7 +172,8 @@ public final class FindBreakpointEvidenceSpark extends GATKSparkTool {
 
         // write a FASTQ file for each interval
         final FermiLiteAssemblyHandler fermiLiteAssemblyHandler =
-                new FermiLiteAssemblyHandler(params.alignerIndexImageFile, params.maxFASTQSize, params.fastqDir, params.writeGFAs);
+                new FermiLiteAssemblyHandler(params.alignerIndexImageFile, params.maxFASTQSize, params.fastqDir,
+                                                params.writeGFAs, params.popVariantBubbles);
         alignedAssemblyOrExcuseList.addAll(
                 handleAssemblies(ctx, qNamesMultiMap, unfilteredReads, filter, intervals.size(),
                         params.includeMappingLocation, fermiLiteAssemblyHandler));
