@@ -6,6 +6,8 @@ import htsjdk.variant.variantcontext.VariantContextBuilder;
 import htsjdk.variant.vcf.VCFConstants;
 import org.broadinstitute.hellbender.tools.walkers.annotator.*;
 import org.broadinstitute.hellbender.tools.walkers.contamination.ContaminationRecord;
+import org.broadinstitute.hellbender.tools.walkers.contamination.MinorAlleleFractionRecord;
+import org.broadinstitute.hellbender.tools.walkers.contamination.PileupSummary;
 import org.broadinstitute.hellbender.utils.GATKProtectedVariantContextUtils;
 import org.broadinstitute.hellbender.utils.MathUtils;
 import org.broadinstitute.hellbender.utils.variant.GATKVCFConstants;
@@ -19,6 +21,7 @@ public class Mutect2FilteringEngine {
     private final double contamination;
     private final double somaticPriorProb;
     private final String tumorSample;
+    final Optional<List<MinorAlleleFractionRecord>> tumorSegments
     public static final String FILTERING_STATUS_VCF_KEY = "filtering_status";
 
     public Mutect2FilteringEngine(final M2FiltersArgumentCollection MTFAC, final String tumorSample) {
@@ -26,6 +29,9 @@ public class Mutect2FilteringEngine {
         contamination = MTFAC.contaminationTable == null ? 0.0 : ContaminationRecord.readFromFile(MTFAC.contaminationTable).get(0).getContamination();
         this.tumorSample = tumorSample;
         somaticPriorProb = Math.pow(10, MTFAC.log10PriorProbOfSomaticEvent);
+
+        tumorSegments = MTFAC.tumorSegmentationTable == null ? Optional.empty() :
+                Optional.of(MinorAlleleFractionRecord.readFromFile(MTFAC.tumorSegmentationTable));
     }
 
     private void applyContaminationFilter(final M2FiltersArgumentCollection MTFAC, final VariantContext vc, final VariantContextBuilder vcb) {

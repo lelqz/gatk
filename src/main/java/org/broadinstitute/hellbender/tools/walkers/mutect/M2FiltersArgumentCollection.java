@@ -1,9 +1,7 @@
 package org.broadinstitute.hellbender.tools.walkers.mutect;
 
 import org.broadinstitute.barclay.argparser.Argument;
-import org.broadinstitute.barclay.argparser.Hidden;
 import org.broadinstitute.hellbender.tools.walkers.haplotypecaller.AssemblyBasedCallerArgumentCollection;
-import org.broadinstitute.hellbender.tools.walkers.contamination.ContaminationRecord;
 
 import java.io.File;
 
@@ -24,6 +22,17 @@ public class M2FiltersArgumentCollection extends AssemblyBasedCallerArgumentColl
     public static final String CONTAMINATION_TABLE_LONG_NAME = "contamination-table";
     public static final String MAX_CONTAMINATION_PROBABILITY_LONG_NAME = "max-contamination-probability";
     public static final String UNIQUE_ALT_READ_COUNT_LONG_NAME = "unique-alt-read-count";
+
+    public static final String TUMOR_SEGMENTATION_LONG_NAME = "tumor-segmentation";
+
+    /**
+     * A table containing tumor segments and the minor allele fraction of germline hets within each segment.
+     * This allows us to refine the germline event filter by, for example, not filtering an allele
+     * with an allele fraction significantly different from 0.5 in a segment where the minor allele fraction is 0.5.
+     */
+    @Argument(fullName = TUMOR_SEGMENTATION_LONG_NAME,
+            doc="Pileup summaries for the tumor sample as output by CalculateContamination", optional = true)
+    public File tumorSegmentationTable = null;
 
     /**
      * Prior log-10 probability that any given site has a somatic allele. Impacts germline probability calculation.
