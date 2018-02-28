@@ -27,9 +27,10 @@ public class M2FiltersArgumentCollection extends AssemblyBasedCallerArgumentColl
 
     /**
      * Prior log-10 probability that any given site has a somatic allele. Impacts germline probability calculation.
-     *
-     * //TODO Note that Mutect2 uses this for the germline annotation while FilterMutectCalls uses this for the contamination filter.
-     * //TODO This duplication is awkward and can probably be addressed by moving some of the germline code into filtering
+     * The workflow uses this parameter only towards the germline event filter. It does NOT relate to the LOD threshold.
+     * For example, -6 translates to one in a million or ~3000 somatic mutations per human genome.
+     * Depending on tumor type, mutation rate ranges vary (Lawrence et al. Nature 2013), and so adjust parameter accordingly.
+     * For higher expected rate of mutation, adjust number up, e.g. -5. For lower expected rate of mutation, adjust number down, e.g. -7.
      */
     @Argument(fullName= LOG_SOMATIC_PRIOR_LONG_NAME,
             doc="Prior probability that a given site has a somatic allele.", optional = true)
