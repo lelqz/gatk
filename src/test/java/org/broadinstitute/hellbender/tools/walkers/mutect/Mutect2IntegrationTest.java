@@ -3,6 +3,7 @@ package org.broadinstitute.hellbender.tools.walkers.mutect;
 import htsjdk.samtools.SamFiles;
 import htsjdk.variant.variantcontext.Genotype;
 import htsjdk.variant.variantcontext.VariantContext;
+import org.apache.commons.collections.ListUtils;
 import org.apache.commons.lang3.tuple.ImmutablePair;
 import org.apache.commons.lang3.tuple.Pair;
 import org.broadinstitute.hellbender.CommandLineProgramTest;
@@ -97,7 +98,7 @@ public class Mutect2IntegrationTest extends CommandLineProgramTest {
 
         // verify that alleles contained in likelihoods matrix but dropped from somatic calls do not show up in annotations
         // also check that alleles have been properly clipped after dropping any non-called alleles, i.e. if we had AAA AA A
-        // and A got dropped, we need AAA AA -> AA A.  The condition we don't want is that all allles share a common first base
+        // and A got dropped, we need AAA AA -> AA A.  The condition we don't want is that all alleles share a common first base
         // and no allele has length 1.
         StreamSupport.stream(new FeatureDataSource<VariantContext>(unfilteredVcf).spliterator(), false)
                 .forEach(vc -> {
@@ -201,31 +202,30 @@ public class Mutect2IntegrationTest extends CommandLineProgramTest {
         final File unfilteredVcf = createTempFile("unfiltered", ".vcf");
         final File filteredVcf = createTempFile("filtered", ".vcf");
 
-        final String[] args = {
-                "-I", NA12878_20_21_WGS_bam,
+        final List<String> argsWithoutGnomad = Arrays.asList("-I", NA12878_20_21_WGS_bam,
                 "-" + M2ArgumentCollection.TUMOR_SAMPLE_SHORT_NAME, "NA12878",
                 "-R", b37_reference_20_21,
                 "-L", "20:10000000-10010000",
-                "--" + M2ArgumentCollection.GERMLINE_RESOURCE_LONG_NAME, GNOMAD.getAbsolutePath(),
-                "-O", unfilteredVcf.getAbsolutePath()
-        };
+                "-O", unfilteredVcf.getAbsolutePath());
+        final List<String> gnomadArgs = Arrays.asList("--" + M2ArgumentCollection.GERMLINE_RESOURCE_LONG_NAME, GNOMAD.getAbsolutePath());
+        final List<String> argsWithGnomad = ListUtils.union(argsWithoutGnomad, gnomadArgs);
+        for (final List<String> args : Arrays.asList(argsWithoutGnomad, argsWithGnomad)) {
+            runCommandLine(args);
 
-        runCommandLine(args);
+            // run FilterMutectCalls
+            new Main().instanceMain(makeCommandLineArgs(Arrays.asList("-V", unfilteredVcf.getAbsolutePath(), "-O", filteredVcf.getAbsolutePath()), "FilterMutectCalls"));
 
-        // run FilterMutectCalls
-        new Main().instanceMain(makeCommandLineArgs(Arrays.asList("-V", unfilteredVcf.getAbsolutePath(), "-O", filteredVcf.getAbsolutePath()), "FilterMutectCalls"));
+            final long numVariantsBeforeFiltering = StreamSupport.stream(new FeatureDataSource<VariantContext>(unfilteredVcf).spliterator(), false).count();
 
+            final long numVariantsPassingFilters = StreamSupport.stream(new FeatureDataSource<VariantContext>(filteredVcf).spliterator(), false)
+                    .filter(vc -> vc.getFilters().isEmpty()).count();
 
-        final long numVariantsBeforeFiltering = StreamSupport.stream(new FeatureDataSource<VariantContext>(unfilteredVcf).spliterator(), false).count();
+            // just a sanity check that this bam has some germline variants on this interval so that our test doesn't pass trivially!
+            Assert.assertTrue(numVariantsBeforeFiltering > 15);
 
-        final long numVariantsPassingFilters = StreamSupport.stream(new FeatureDataSource<VariantContext>(filteredVcf).spliterator(), false)
-                .filter(vc -> vc.getFilters().isEmpty()).count();
-
-        // just a sanity check that this bam has some germline variants on this interval so that our test doesn't pass trivially!
-        Assert.assertTrue(numVariantsBeforeFiltering > 15);
-
-        // every variant on this interval in this sample is in gnomAD
-        Assert.assertTrue(numVariantsPassingFilters < 2);
+            // every variant on this interval in this sample is in gnomAD
+            Assert.assertTrue(numVariantsPassingFilters < 2);
+        }
     }
 
     @Test
@@ -291,9 +291,6 @@ public class Mutect2IntegrationTest extends CommandLineProgramTest {
                 }).collect(Collectors.toList());
 
         Assert.assertTrue(highAlleleFractionFilteredVariantsAtFivePercent.isEmpty());
-
-        int j = 4;
-
     }
 
     // test that ReadFilterLibrary.NON_ZERO_REFERENCE_LENGTH_ALIGNMENT removes reads that consume zero reference bases

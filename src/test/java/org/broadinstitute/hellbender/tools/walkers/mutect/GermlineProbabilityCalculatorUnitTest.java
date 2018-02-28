@@ -12,6 +12,7 @@ import org.testng.annotations.Test;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalDouble;
 
 /**
  * Created by David Benjamin on 5/5/17.
@@ -21,10 +22,9 @@ public class GermlineProbabilityCalculatorUnitTest extends GATKBaseTest {
     @Test(dataProvider = "log10ProbabilityData")
     public void testLog10PosteriorProbabilityOfGermlineVariant(final double normalLog10Odds, final double tumorLog10Odds,
                                                                final double populationAF, final double log10SomaticPrior,
-                                                               final double expectedLog10Posterior,
-                                                               final double tolerance) {
+                                                               final double expectedLog10Posterior, final double tolerance) {
         final double actual = GermlineProbabilityCalculator.log10PosteriorProbabilityOfGermlineVariant(normalLog10Odds, tumorLog10Odds,
-                populationAF, log10SomaticPrior);
+                tumorLog10Odds, populationAF, log10SomaticPrior);
         Assert.assertEquals(actual, expectedLog10Posterior, tolerance);
     }
 
