@@ -58,8 +58,7 @@ public class Mutect2FilteringEngine {
         final double contaminantLikelihood = Math.max(singleContaminantLikelihood, manyContaminantLikelihood);
         final double posteriorProbOfContamination = (1 - somaticPriorProb) * contaminantLikelihood / ((1 - somaticPriorProb) * contaminantLikelihood + somaticPriorProb * somaticLikelihood);
 
-
-
+        vcb.attribute(GATKVCFConstants.POSTERIOR_PROB_OF_CONTAMINATION_ATTRIBUTE, posteriorProbOfContamination);
         if (posteriorProbOfContamination > MTFAC.maxContaminationProbability) {
             vcb.filter(GATKVCFConstants.CONTAMINATION_FILTER_NAME);
         }
