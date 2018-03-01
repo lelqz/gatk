@@ -163,9 +163,6 @@ public class Mutect2FilteringEngine {
                 return log10GermlineLikelihood - log10SomaticLikelihood;
             });
 
-            //TODO: we have forgotten about the possibility of being hom alt in the germline, and that causes homa lts to pass!!!!!!
-            // TODO: this is a huge problem!!!!! MUST FIX!!!!
-
             // see docs -- basically the tumor likelihood for a germline hom alt is approximately equal to the somatic likelihood
             // as long as the allele fraction is high
             final double[] log10OddsOfGermlineHomAltVsSomatic = MathUtils.applyToArray(altAlleleFractions, x-> x < MIN_ALLELE_FRACTION_FOR_GERMLINE_HET ? Double.NEGATIVE_INFINITY : 0);
