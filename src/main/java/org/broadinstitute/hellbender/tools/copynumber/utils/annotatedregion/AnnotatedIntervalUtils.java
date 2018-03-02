@@ -1,6 +1,7 @@
 package org.broadinstitute.hellbender.tools.copynumber.utils.annotatedregion;
 
 import com.google.common.collect.Sets;
+import htsjdk.samtools.SAMFileHeader;
 import htsjdk.samtools.SAMSequenceDictionary;
 import htsjdk.samtools.util.Locatable;
 import htsjdk.samtools.util.PeekableIterator;
@@ -8,10 +9,17 @@ import org.apache.commons.lang3.StringUtils;
 import org.broadinstitute.hellbender.utils.IntervalUtils;
 import org.broadinstitute.hellbender.utils.SimpleInterval;
 import org.broadinstitute.hellbender.utils.Utils;
+import org.broadinstitute.hellbender.utils.codecs.xsvLocatableTable.XsvLocatableTableCodec;
+import org.broadinstitute.hellbender.utils.io.Resource;
 
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Path;
 import java.util.*;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
+
+import static org.broadinstitute.hellbender.utils.codecs.xsvLocatableTable.XsvLocatableTableCodec.getAndValidateConfigFileContents;
 
 public class AnnotatedIntervalUtils {
 
@@ -146,5 +154,43 @@ public class AnnotatedIntervalUtils {
         final int end = Math.max(segment1.getEnd(), segment2.getEnd());
 
         return new SimpleInterval(segment1.getContig(), start, end);
+    }
+
+    /** TODO: Docs
+     * TODO: Document the config file.
+     *
+     *
+     * @param annotations
+     * @param samFileHeader
+     * @param comments
+     * @return
+     * @throws IOException
+     */
+    public static AnnotatedIntervalHeader createHeaderForWriter(final List<String> annotations, final SAMFileHeader samFileHeader, final List<String> comments) throws IOException {
+        final Path resourceFile = Resource.getResourceContentsAsFile(AnnotatedIntervalCollection.ANNOTATED_REGION_DEFAULT_CONFIG_RESOURCE).toPath();
+        return createHeaderForWriter(resourceFile, annotations, samFileHeader, comments);
+    }
+
+    /** TODO: Docs
+     *
+     * @param outputConfigFile
+     * @param annotations
+     * @param samFileHeader
+     * @param comments
+     * @return
+     * @throws IOException
+     */
+    public static AnnotatedIntervalHeader createHeaderForWriter(final Path outputConfigFile, final List<String> annotations, final SAMFileHeader samFileHeader, final List<String> comments) throws IOException {
+        final File resourceFile = Resource.getResourceContentsAsFile(outputConfigFile.toString());
+        final Properties headerNameProperties = getAndValidateConfigFileContents(resourceFile.toPath());
+        final String contigColumnName = headerNameProperties.getProperty(XsvLocatableTableCodec.CONFIG_FILE_CONTIG_COLUMN_KEY);
+        final String startColumnName = headerNameProperties.getProperty(XsvLocatableTableCodec.CONFIG_FILE_START_COLUMN_KEY);
+        final String endColumnName = headerNameProperties.getProperty(XsvLocatableTableCodec.CONFIG_FILE_END_COLUMN_KEY);
+
+        XsvLocatableTableCodec.validateLocatableColumnName(contigColumnName);
+        XsvLocatableTableCodec.validateLocatableColumnName(startColumnName);
+        XsvLocatableTableCodec.validateLocatableColumnName(endColumnName);
+
+        return new AnnotatedIntervalHeader(contigColumnName, startColumnName, endColumnName, annotations, samFileHeader, comments);
     }
 }

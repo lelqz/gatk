@@ -26,8 +26,6 @@ import java.util.*;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-import static org.broadinstitute.hellbender.utils.codecs.xsvLocatableTable.XsvLocatableTableCodec.getAndValidateConfigFileContents;
-
 /**
  * Represents a collection of annotated regions.  The annotations do not need to be known ahead of time, if reading from a file.
  *
@@ -117,7 +115,6 @@ public class AnnotatedIntervalCollection {
         return new AnnotatedIntervalCollection(samFileHeader, annotations, comments, updatedAnnotatedIntervals);
     }
 
-    //TODO: Update docs since this is not the primary way of creating a collection.  Move the detailed comments to the public method.
     /** Create a collection based on the contents of an input file and a given config file.  The config file must be the same as
      * is ingested by {@link XsvLocatableTableCodec}.
      *
@@ -200,26 +197,14 @@ public class AnnotatedIntervalCollection {
     public void write(final File outputFile) {
         try (final AnnotatedIntervalWriter writer = new SimpleAnnotatedIntervalWriter(outputFile);){
 
-            writer.writeHeader(createHeaderForWriter(annotations, samFileHeader, comments));
+            writer.writeHeader(AnnotatedIntervalUtils.createHeaderForWriter(annotations, samFileHeader, comments));
             getRecords().forEach(writer::add);
         } catch (final IOException ioe) {
             throw new GATKException("Error - could not write output file: " + outputFile.getAbsolutePath(), ioe);
         }
     }
 
-    private static AnnotatedIntervalHeader createHeaderForWriter(final List<String> annotations, final SAMFileHeader samFileHeader, final List<String> comments) throws IOException {
-        final File resourceFile = Resource.getResourceContentsAsFile(AnnotatedIntervalCollection.ANNOTATED_REGION_DEFAULT_CONFIG_RESOURCE);
-        final Properties headerNameProperties = getAndValidateConfigFileContents(resourceFile.toPath());
-        final String contigColumnName = headerNameProperties.getProperty(XsvLocatableTableCodec.CONFIG_FILE_CONTIG_COLUMN_KEY);
-        final String startColumnName = headerNameProperties.getProperty(XsvLocatableTableCodec.CONFIG_FILE_START_COLUMN_KEY);
-        final String endColumnName = headerNameProperties.getProperty(XsvLocatableTableCodec.CONFIG_FILE_END_COLUMN_KEY);
 
-        XsvLocatableTableCodec.validateLocatableColumnName(contigColumnName);
-        XsvLocatableTableCodec.validateLocatableColumnName(startColumnName);
-        XsvLocatableTableCodec.validateLocatableColumnName(endColumnName);
-
-        return new AnnotatedIntervalHeader(contigColumnName, startColumnName, endColumnName, annotations, samFileHeader, comments);
-    }
 
     /** Can return {@code null} */
     public SAMFileHeader getSamFileHeader() {
