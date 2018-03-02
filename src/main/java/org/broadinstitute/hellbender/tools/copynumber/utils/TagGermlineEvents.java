@@ -73,10 +73,7 @@ public class TagGermlineEvents extends GATKTool{
         final AnnotatedIntervalCollection finalCollection =
                 AnnotatedIntervalCollection.create(tumorSegments,
                         tumorAnnotatedIntervalCollection.getSamFileHeader(),
-                        finalAnnotations, tumorAnnotatedIntervalCollection.getComments(),
-                        tumorAnnotatedIntervalCollection.getContigColumnName(),
-                        tumorAnnotatedIntervalCollection.getStartColumnName(),
-                        tumorAnnotatedIntervalCollection.getEndColumnName());
+                        finalAnnotations, tumorAnnotatedIntervalCollection.getComments());
         finalCollection.write(outputFile);
     }
 

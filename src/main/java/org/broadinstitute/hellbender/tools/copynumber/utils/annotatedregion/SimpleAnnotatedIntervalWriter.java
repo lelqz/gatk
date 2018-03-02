@@ -78,18 +78,27 @@ public class SimpleAnnotatedIntervalWriter implements AnnotatedIntervalWriter {
         this.endColumnHeader = endColumnName;
     }
 
+    // TODO: Test that the 3 structured comments are there.
+    // TODO: Fix the tests that will now break due to the new comment lines.
+    // TODO: Test that the 3 structured comments are there and overwrite ones that might be existing.
     // TODO: Test for other column names besides the standard.
+    // TODO: file a github issue to eventually use these 3 header lines on input, when they are present, to get the names of the chrom/start/stop columns (possibly still with a fallback to a separate config file if they aren't, but that is a point we can debate in a future PR).
     @Override
-    public void writeHeader(final XsvLocatableHeader xsvLocatableHeader) {
+    public void writeHeader(final AnnotatedIntervalHeader annotatedIntervalHeader) {
         if (!hasHeaderBeenWritten) {
-            initializeForWriting(xsvLocatableHeader.getContigColumnName(), xsvLocatableHeader.getStartColumnName(), xsvLocatableHeader.getEndColumnName(), xsvLocatableHeader.getAnnotations());
+            initializeForWriting(annotatedIntervalHeader.getContigColumnName(), annotatedIntervalHeader.getStartColumnName(), annotatedIntervalHeader.getEndColumnName(), annotatedIntervalHeader.getAnnotations());
             try {
-                for (final String comment : xsvLocatableHeader.getComments()) {
+                for (final String comment : annotatedIntervalHeader.getComments()) {
                     writer.writeComment(comment);
                 }
+                // Write out the column headers as a comment
+                writer.writeComment("_ContigHeader=" + annotatedIntervalHeader.getContigColumnName());
+                writer.writeComment("_StartHeader=" + annotatedIntervalHeader.getStartColumnName());
+                writer.writeComment("_EndHeader=" + annotatedIntervalHeader.getEndColumnName());
+
                 // A bit more manual to write the SAM Header
-                if (xsvLocatableHeader.getSamFileHeader() != null) {
-                    fileWriter.write(xsvLocatableHeader.getSamFileHeader().getSAMString());
+                if (annotatedIntervalHeader.getSamFileHeader() != null) {
+                    fileWriter.write(annotatedIntervalHeader.getSamFileHeader().getSAMString());
                 }
                 writer.writeHeaderIfApplies();
             } catch (final IOException e) {

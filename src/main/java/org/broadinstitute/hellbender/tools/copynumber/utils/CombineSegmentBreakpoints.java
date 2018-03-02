@@ -126,9 +126,7 @@ public class CombineSegmentBreakpoints extends GATKTool {
                 .concat(annotatedIntervalCollection1.getComments().stream(), annotatedIntervalCollection2.getComments().stream())
                 .collect(Collectors.toList());
         final AnnotatedIntervalCollection finalCollection =
-                AnnotatedIntervalCollection.create(finalList, outputSamFileHeader, finalAnnotations, finalComments,
-                        annotatedIntervalCollection1.getContigColumnName(), annotatedIntervalCollection1.getStartColumnName(),
-                        annotatedIntervalCollection1.getEndColumnName());
+                AnnotatedIntervalCollection.create(finalList, outputSamFileHeader, finalAnnotations, finalComments);
         finalCollection.write(outputFile);
     }
 

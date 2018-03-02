@@ -389,18 +389,6 @@ public final class XsvLocatableTableCodec extends AsciiFeatureCodec<XsvTableFeat
                 .collect(Collectors.toList());
     }
 
-    public String getFinalContigColumn() {
-        return finalContigColumn;
-    }
-
-    public String getFinalStartColumn() {
-        return finalStartColumn;
-    }
-
-    public String getFinalEndColumn() {
-        return finalEndColumn;
-    }
-
     /**
      * Throw an exception if the given column name cannot be used for one of the locatable columns.
      * @param columnName candidate column name for one of the locatable fields (contig, start, or end)

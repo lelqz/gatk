@@ -68,8 +68,7 @@ public class AnnotatedIntervalCollectionUnitTest extends GATKBaseTest {
                 AnnotatedIntervalCollection.create(TEST_FILE.toPath(), headersOfInterest).getRecords();
         final AnnotatedIntervalCollection collection = AnnotatedIntervalCollection.create(annotatedIntervals,
                 new SAMFileHeader(ReferenceUtils.loadFastaDictionary(new File(hg19_chr1_1M_dict))),
-                Lists.newArrayList("name", "learning_SAMPLE_0"), Collections.emptyList(),
-                "CONTIG", "START", "END");
+                Lists.newArrayList("name", "learning_SAMPLE_0"), Collections.emptyList());
 
         Assert.assertEquals(collection.getRecords(), annotatedIntervals);
     }

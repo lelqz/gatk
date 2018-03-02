@@ -7,9 +7,9 @@ public interface AnnotatedIntervalWriter extends Closeable {
     /**
      * Write only the header (and any SAMFileHeader or comments)
      *
-     * @param xsvLocatableHeader
+     * @param annotatedIntervalHeader
      */
-    void writeHeader(final XsvLocatableHeader xsvLocatableHeader);
+    void writeHeader(final AnnotatedIntervalHeader annotatedIntervalHeader);
 
     /**
      * attempt to close the file

@@ -28,7 +28,7 @@ public class SimpleAnnotatedIntervalWriterUnitTest extends GATKBaseTest {
         //TODO: Have the writer ingest a config file?  Since we force it on the input, why not the output?
         // TODO: Does the AnnotatedIntervalCollection need to know contig, start, and end columns?
         writer.writeHeader(
-                new XsvLocatableHeader("CONTIG", "START", "END", collection.getAnnotations(), null, collection.getComments()));
+                new AnnotatedIntervalHeader("CONTIG", "START", "END", collection.getAnnotations(), null, collection.getComments()));
         collection.getRecords().forEach(r -> writer.add(r));
         writer.close();
 
@@ -47,7 +47,7 @@ public class SimpleAnnotatedIntervalWriterUnitTest extends GATKBaseTest {
         final SimpleAnnotatedIntervalWriter writer = new SimpleAnnotatedIntervalWriter(outputFile);
 
         writer.writeHeader(
-                new XsvLocatableHeader("CONTIG", "START", "END", collection.getAnnotations(), collection.getSamFileHeader(), collection.getComments()));
+                new AnnotatedIntervalHeader("CONTIG", "START", "END", collection.getAnnotations(), collection.getSamFileHeader(), collection.getComments()));
         collection.getRecords().forEach(r -> writer.add(r));
         writer.close();
 

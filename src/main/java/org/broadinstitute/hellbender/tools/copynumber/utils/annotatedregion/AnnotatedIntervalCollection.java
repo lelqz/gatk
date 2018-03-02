@@ -27,6 +27,8 @@ import java.util.*;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import static org.broadinstitute.hellbender.utils.codecs.xsvLocatableTable.XsvLocatableTableCodec.getAndValidateConfigFileContents;
+
 /**
  * Represents a collection of annotated regions.  The annotations do not need to be known ahead of time, if reading from a file.
  *
@@ -47,25 +49,12 @@ public class AnnotatedIntervalCollection {
 
     private final List<AnnotatedInterval> records;
 
-    /* The output contig column name */
-    private final String contigColumnName;
-
-    /* The output start column name */
-    private final String startColumnName;
-
-    /* The output end column name */
-    private final String endColumnName;
-
     private AnnotatedIntervalCollection(final SAMFileHeader samFileHeader, final List<String> annotations, final List<String> comments,
-                                        final List<AnnotatedInterval> records, final String contigColumnName,
-                                        final String startColumnName, final String endColumnName) {
+                                        final List<AnnotatedInterval> records) {
         this.comments = comments;
         this.samFileHeader = samFileHeader;
         this.annotations = annotations;
         this.records = records;
-        this.contigColumnName = contigColumnName;
-        this.startColumnName = startColumnName;
-        this.endColumnName = endColumnName;
     }
 
     /**
@@ -112,35 +101,24 @@ public class AnnotatedIntervalCollection {
      *                      {@code null} is allowed.
      * @param annotations List of annotations to preserve in the regions.  Never {@code null}.  These are the only annotations that will be written.
      * @param comments List of comments that need to be associated with this collection.  Use {@link Collections#emptyList()} when no comments needed.  Never {@code null}.
-     * @param contigColumnName contig column name to use if the collection is written.  Can't be {@code null}, empty, or a number.
-     * @param startColumnName start column name to use if the collection is written.  Can't be {@code null}, empty, or a number.
-     * @param endColumnName end column name to use if the collection is written.  Can't be {@code null}, empty, or a number.
      * @return collection based on the inputs.  Never {@code null}.
      */
     public static AnnotatedIntervalCollection create(final List<AnnotatedInterval> regions,
                                                      final SAMFileHeader samFileHeader,
                                                      final List<String> annotations,
-                                                     final List<String> comments,
-                                                     final String contigColumnName,
-                                                     final String startColumnName,
-                                                     final String endColumnName) {
+                                                     final List<String> comments) {
 
         Utils.nonNull(regions);
         Utils.nonNull(annotations);
         Utils.nonNull(comments);
-        XsvLocatableTableCodec.validateLocatableColumnName(contigColumnName);
-        XsvLocatableTableCodec.validateLocatableColumnName(startColumnName);
-        XsvLocatableTableCodec.validateLocatableColumnName(endColumnName);
 
         final List<AnnotatedInterval> updatedAnnotatedIntervals = regions.stream().map(r -> copyAnnotatedInterval(r, annotations))
                 .collect(Collectors.toList());
 
-        return new AnnotatedIntervalCollection(samFileHeader, annotations, comments, updatedAnnotatedIntervals,
-                contigColumnName, startColumnName, endColumnName);
+        return new AnnotatedIntervalCollection(samFileHeader, annotations, comments, updatedAnnotatedIntervals);
     }
 
-
-
+    //TODO: Update docs since this is not the primary way of creating a collection.  Move the detailed comments to the public method.
     /** Create a collection based on the contents of an input file and a given config file.  The config file must be the same as
      * is ingested by {@link XsvLocatableTableCodec}.
      *
@@ -189,7 +167,7 @@ public class AnnotatedIntervalCollection {
                 }
 
                 return new AnnotatedIntervalCollection(codec.createSamFileHeader(), codec.getHeaderWithoutLocationColumns(),
-                        codec.getComments(), regions, codec.getFinalContigColumn(), codec.getFinalStartColumn(), codec.getFinalEndColumn());
+                        codec.getComments(), regions);
 
             }
             catch ( final FileNotFoundException ex ) {
@@ -224,11 +202,25 @@ public class AnnotatedIntervalCollection {
     public void write(final File outputFile) {
         try (final AnnotatedIntervalWriter writer = new SimpleAnnotatedIntervalWriter(outputFile);){
 
-            writer.writeHeader(AnnotatedIntervalUtils.createHeaderForWriter(annotations, samFileHeader, comments));
+            writer.writeHeader(createHeaderForWriter(annotations, samFileHeader, comments));
             getRecords().forEach(writer::add);
         } catch (final IOException ioe) {
             throw new GATKException("Error - could not write output file: " + outputFile.getAbsolutePath(), ioe);
         }
+    }
+
+    private static AnnotatedIntervalHeader createHeaderForWriter(final List<String> annotations, final SAMFileHeader samFileHeader, final List<String> comments) throws IOException {
+        final File resourceFile = Resource.getResourceContentsAsFile(AnnotatedIntervalCollection.ANNOTATED_REGION_DEFAULT_CONFIG_RESOURCE);
+        final Properties headerNameProperties = getAndValidateConfigFileContents(resourceFile.toPath());
+        final String contigColumnName = headerNameProperties.getProperty(XsvLocatableTableCodec.CONFIG_FILE_CONTIG_COLUMN_KEY);
+        final String startColumnName = headerNameProperties.getProperty(XsvLocatableTableCodec.CONFIG_FILE_START_COLUMN_KEY);
+        final String endColumnName = headerNameProperties.getProperty(XsvLocatableTableCodec.CONFIG_FILE_END_COLUMN_KEY);
+
+        XsvLocatableTableCodec.validateLocatableColumnName(contigColumnName);
+        XsvLocatableTableCodec.validateLocatableColumnName(startColumnName);
+        XsvLocatableTableCodec.validateLocatableColumnName(endColumnName);
+
+        return new AnnotatedIntervalHeader(contigColumnName, startColumnName, endColumnName, annotations, samFileHeader, comments);
     }
 
     /** Can return {@code null} */
@@ -250,17 +242,5 @@ public class AnnotatedIntervalCollection {
 
     public int size() {
         return getRecords().size();
-    }
-
-    public String getContigColumnName() {
-        return contigColumnName;
-    }
-
-    public String getStartColumnName() {
-        return startColumnName;
-    }
-
-    public String getEndColumnName() {
-        return endColumnName;
     }
 }
