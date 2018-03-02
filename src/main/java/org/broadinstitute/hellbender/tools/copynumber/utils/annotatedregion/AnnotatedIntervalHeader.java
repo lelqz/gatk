@@ -46,6 +46,7 @@ public class AnnotatedIntervalHeader {
         return annotations;
     }
 
+    /** Can be {@code null} */
     public SAMFileHeader getSamFileHeader() {
         return samFileHeader;
     }

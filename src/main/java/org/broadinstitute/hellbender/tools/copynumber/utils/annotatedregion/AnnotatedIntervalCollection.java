@@ -35,7 +35,7 @@ public class AnnotatedIntervalCollection {
 
     private static final Logger logger = LogManager.getLogger(AnnotatedIntervalCollection.class);
 
-    public static final String ANNOTATED_REGION_DEFAULT_CONFIG_RESOURCE = "org/broadinstitute/hellbender/tools/copynumber/utils/annotatedregion/annotated_region_default.config";
+    public static final String ANNOTATED_INTERVAL_DEFAULT_CONFIG_RESOURCE = "org/broadinstitute/hellbender/tools/copynumber/utils/annotatedregion/annotated_region_default.config";
     private final SAMFileHeader samFileHeader;
 
     /** Does not include the locatable fields. */
@@ -55,15 +55,15 @@ public class AnnotatedIntervalCollection {
     }
 
     /**
-     *  Same as {@link #create(Path, Path, Set)} , but uses the default annotation
-     *   region config file in the GATK.
+     *  Same as {@link #create(Path, Path, Set)} , but uses the default annotated
+     *   interval config file in the GATK.
      * @param input See {@link #create(Path, Path, Set)}
      * @param headersOfInterest See {@link #create(Path, Path, Set)}
      * @return See {@link #create(Path, Path, Set)}
      */
     public static AnnotatedIntervalCollection create(final Path input, final Set<String> headersOfInterest) {
 
-        final String resourcePath = ANNOTATED_REGION_DEFAULT_CONFIG_RESOURCE;
+        final String resourcePath = ANNOTATED_INTERVAL_DEFAULT_CONFIG_RESOURCE;
         try {
             final File tmpResourceFile = Resource.getResourceContentsAsFile(resourcePath);
             return create(input, tmpResourceFile.toPath(), headersOfInterest);
@@ -115,6 +115,7 @@ public class AnnotatedIntervalCollection {
         return new AnnotatedIntervalCollection(samFileHeader, annotations, comments, updatedAnnotatedIntervals);
     }
 
+    // TODO: Add comments about how the reading should be moved into tribble, and then we could probably get rid of this method -- or at least not have to call it manually.
     /** Create a collection based on the contents of an input file and a given config file.  The config file must be the same as
      * is ingested by {@link XsvLocatableTableCodec}.
      *
@@ -195,16 +196,11 @@ public class AnnotatedIntervalCollection {
      * @param outputFile destination file, must be writable.
      */
     public void write(final File outputFile) {
-        try (final AnnotatedIntervalWriter writer = new SimpleAnnotatedIntervalWriter(outputFile);){
-
-            writer.writeHeader(AnnotatedIntervalUtils.createHeaderForWriter(annotations, samFileHeader, comments));
-            getRecords().forEach(writer::add);
-        } catch (final IOException ioe) {
-            throw new GATKException("Error - could not write output file: " + outputFile.getAbsolutePath(), ioe);
-        }
+        final AnnotatedIntervalWriter writer = new SimpleAnnotatedIntervalWriter(outputFile);
+        writer.writeHeader(AnnotatedIntervalUtils.createHeaderForWriter(annotations, samFileHeader, comments));
+        getRecords().forEach(writer::add);
+        writer.close();
     }
-
-
 
     /** Can return {@code null} */
     public SAMFileHeader getSamFileHeader() {

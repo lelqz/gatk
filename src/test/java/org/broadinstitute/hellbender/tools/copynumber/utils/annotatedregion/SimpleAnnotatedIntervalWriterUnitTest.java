@@ -30,10 +30,7 @@ public class SimpleAnnotatedIntervalWriterUnitTest extends GATKBaseTest {
         final AnnotatedIntervalCollection collection = AnnotatedIntervalCollection.create(TEST_FILE_NO_SAMHEADER.toPath(), null);
 
         final SimpleAnnotatedIntervalWriter writer = new SimpleAnnotatedIntervalWriter(outputFile);
-
-        //TODO: Have the writer ingest a config file?  Since we force it on the input, why not the output?
-        writer.writeHeader(
-                new AnnotatedIntervalHeader("CONTIG", "START", "END", collection.getAnnotations(), null, collection.getComments()));
+        writer.writeHeader(AnnotatedIntervalUtils.createHeaderForWriter(collection.getAnnotations(), null, collection.getComments()));
         collection.getRecords().forEach(r -> writer.add(r));
         writer.close();
 
@@ -75,7 +72,8 @@ public class SimpleAnnotatedIntervalWriterUnitTest extends GATKBaseTest {
 
     @Test
     public void testRoundTripWithReplacementHeader() throws IOException {
-        // Tests that we can read a file with a non-standard header (specified by a config file) and that we can output with different headers.
+        // Tests that we can read a file with a non-standard header (specified by a config file) and that we can output
+        //  with the default headers (input headers would then not match output headers).
         //  Also, tests that the structured comments get replaced with the new value.
         final File outputFile = File.createTempFile("simpleannotatedintervalwriter_", ".tsv");
         final AnnotatedIntervalCollection collection = AnnotatedIntervalCollection.create(TEST_FILE_OLD_HEADER.toPath(),

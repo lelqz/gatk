@@ -6,6 +6,7 @@ import htsjdk.samtools.SAMSequenceDictionary;
 import htsjdk.samtools.util.Locatable;
 import htsjdk.samtools.util.PeekableIterator;
 import org.apache.commons.lang3.StringUtils;
+import org.broadinstitute.hellbender.exceptions.GATKException;
 import org.broadinstitute.hellbender.utils.IntervalUtils;
 import org.broadinstitute.hellbender.utils.SimpleInterval;
 import org.broadinstitute.hellbender.utils.Utils;
@@ -17,6 +18,7 @@ import java.nio.file.Path;
 import java.util.*;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 import static org.broadinstitute.hellbender.utils.codecs.xsvLocatableTable.XsvLocatableTableCodec.getAndValidateConfigFileContents;
 
@@ -155,37 +157,40 @@ public class AnnotatedIntervalUtils {
         return new SimpleInterval(segment1.getContig(), start, end);
     }
 
-    /** TODO: Docs
-     * TODO: Document the config file.
+    /**
+     *  See {@link #createHeaderForWriter(Path, List, SAMFileHeader, List)}
      *
+     *  This will use the default headers for annotated regions.  Call this method if no config file is available.
      *
      * @param annotations
      * @param samFileHeader
      * @param comments
      * @return
-     * @throws IOException
      */
-    public static AnnotatedIntervalHeader createHeaderForWriter(final List<String> annotations, final SAMFileHeader samFileHeader, final List<String> comments) throws IOException {
+    public static AnnotatedIntervalHeader createHeaderForWriter(final List<String> annotations, final SAMFileHeader samFileHeader, final List<String> comments) {
         Utils.nonNull(annotations);
-        Utils.nonNull(samFileHeader);
         Utils.nonNull(comments);
-        final Path resourceFile = Resource.getResourceContentsAsFile(AnnotatedIntervalCollection.ANNOTATED_REGION_DEFAULT_CONFIG_RESOURCE).toPath();
-        return createHeaderForWriter(resourceFile, annotations, samFileHeader, comments);
+        try {
+            final Path resourceFile = Resource.getResourceContentsAsFile(AnnotatedIntervalCollection.ANNOTATED_INTERVAL_DEFAULT_CONFIG_RESOURCE).toPath();
+            return createHeaderForWriter(resourceFile, annotations, samFileHeader, comments);
+        } catch (final IOException ioe) {
+            throw new GATKException.ShouldNeverReachHereException("Could not load the default config file for annotated intervals.", ioe);
+        }
     }
 
-    /** TODO: Docs
+    /**
+     * Create an annotated interval header based on a config file (for locatable field names only) and a list of annotations (the rest of the fields).
      *
-     * @param outputConfigFile
-     * @param annotations
-     * @param samFileHeader
-     * @param comments
-     * @return
-     * @throws IOException
+     * @param outputConfigFile config path for determining the locatable column headers.  Never {@code null}.
+     * @param annotations  Names of the annotations to render.  If any of the locatable columns are in the annotation, those columns will be removed from the annotations list in the header.
+     *                     Never {@code null}.
+     * @param samFileHeader SAM FileHeader to prepend to the data.  {@code null} is allowed.
+     * @param comments Comments that will prepended to the entire file.  Never {@code null}.
+     * @return a header that can be used in an AnnotatedFileWriter.  Never {@code null}.
      */
-    public static AnnotatedIntervalHeader createHeaderForWriter(final Path outputConfigFile, final List<String> annotations, final SAMFileHeader samFileHeader, final List<String> comments) throws IOException {
+    public static AnnotatedIntervalHeader createHeaderForWriter(final Path outputConfigFile, final List<String> annotations, final SAMFileHeader samFileHeader, final List<String> comments) {
 
         Utils.nonNull(annotations);
-        Utils.nonNull(samFileHeader);
         Utils.nonNull(comments);
         Utils.nonNull(outputConfigFile);
 
@@ -198,6 +203,10 @@ public class AnnotatedIntervalUtils {
         XsvLocatableTableCodec.validateLocatableColumnName(startColumnName);
         XsvLocatableTableCodec.validateLocatableColumnName(endColumnName);
 
-        return new AnnotatedIntervalHeader(contigColumnName, startColumnName, endColumnName, annotations, samFileHeader, comments);
+        final List<String> finalAnnotations = annotations.stream()
+                .filter(a -> !a.equals(contigColumnName) && !a.equals(startColumnName) && !a.equals(endColumnName))
+                .collect(Collectors.toList());
+
+        return new AnnotatedIntervalHeader(contigColumnName, startColumnName, endColumnName, finalAnnotations, samFileHeader, comments);
     }
 }
