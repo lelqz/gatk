@@ -1,6 +1,5 @@
 package org.broadinstitute.hellbender.tools.copynumber.utils.annotatedregion;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Sets;
 import htsjdk.samtools.SAMFileHeader;
 import htsjdk.tribble.readers.AsciiLineReader;
@@ -129,8 +128,7 @@ public class AnnotatedIntervalCollection {
      *                          Use {@code null} to indicate "all headers are of interest".
      * @return never {@code null}
      */
-    @VisibleForTesting
-    static AnnotatedIntervalCollection create(final Path input, final Path inputConfigFile, final Set<String> headersOfInterest) {
+    public static AnnotatedIntervalCollection create(final Path input, final Path inputConfigFile, final Set<String> headersOfInterest) {
 
         IOUtils.assertFileIsReadable(input);
         IOUtils.assertFileIsReadable(inputConfigFile);

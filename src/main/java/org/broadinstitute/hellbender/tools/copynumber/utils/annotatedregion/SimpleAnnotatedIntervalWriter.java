@@ -82,16 +82,13 @@ public class SimpleAnnotatedIntervalWriter implements AnnotatedIntervalWriter {
         this.endColumnHeader = endColumnName;
     }
 
-    // TODO: Include a file with ReCapSeg headers for testing.  Use a config file to specify the files.
-    // TODO: Fix the tests that will now break due to the new comment lines.
-    // TODO: Test for other column names besides the standard.
     // TODO: file a github issue to eventually use these 3 header lines on input, when they are present, to get the names of the chrom/start/stop columns (possibly still with a fallback to a separate config file if they aren't, but that is a point we can debate in a future PR).
     @Override
     public void writeHeader(final AnnotatedIntervalHeader annotatedIntervalHeader) {
         if (!hasHeaderBeenWritten) {
             initializeForWriting(annotatedIntervalHeader.getContigColumnName(), annotatedIntervalHeader.getStartColumnName(), annotatedIntervalHeader.getEndColumnName(), annotatedIntervalHeader.getAnnotations());
             try {
-                // TODO: Test replacement structured comments.
+
                 // Remove old structured comments, if present.
                 final List<String> commentsToWrite = annotatedIntervalHeader.getComments().stream()
                         .filter(c -> !c.startsWith(CONTIG_COL_COMMENT))
