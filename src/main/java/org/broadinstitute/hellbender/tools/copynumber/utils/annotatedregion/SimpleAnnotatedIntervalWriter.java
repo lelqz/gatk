@@ -15,6 +15,7 @@ import java.io.IOException;
 import java.io.Writer;
 import java.nio.file.Files;
 import java.util.List;
+import java.util.stream.Collectors;
 
 
 /**
@@ -24,6 +25,9 @@ import java.util.List;
  */
 public class SimpleAnnotatedIntervalWriter implements AnnotatedIntervalWriter {
 
+    public static final String CONTIG_COL_COMMENT = "_ContigHeader=";
+    public static final String START_COL_COMMENT = "_StartHeader=";
+    public static final String END_COL_COMMENT = "_EndHeader=";
     private SimpleTableWriter writer;
     private FileWriter fileWriter;
     private String contigColumnHeader;
@@ -78,9 +82,8 @@ public class SimpleAnnotatedIntervalWriter implements AnnotatedIntervalWriter {
         this.endColumnHeader = endColumnName;
     }
 
-    // TODO: Test that the 3 structured comments are there.
+    // TODO: Include a file with ReCapSeg headers for testing.  Use a config file to specify the files.
     // TODO: Fix the tests that will now break due to the new comment lines.
-    // TODO: Test that the 3 structured comments are there and overwrite ones that might be existing.
     // TODO: Test for other column names besides the standard.
     // TODO: file a github issue to eventually use these 3 header lines on input, when they are present, to get the names of the chrom/start/stop columns (possibly still with a fallback to a separate config file if they aren't, but that is a point we can debate in a future PR).
     @Override
@@ -88,13 +91,21 @@ public class SimpleAnnotatedIntervalWriter implements AnnotatedIntervalWriter {
         if (!hasHeaderBeenWritten) {
             initializeForWriting(annotatedIntervalHeader.getContigColumnName(), annotatedIntervalHeader.getStartColumnName(), annotatedIntervalHeader.getEndColumnName(), annotatedIntervalHeader.getAnnotations());
             try {
-                for (final String comment : annotatedIntervalHeader.getComments()) {
+                // TODO: Test replacement structured comments.
+                // Remove old structured comments, if present.
+                final List<String> commentsToWrite = annotatedIntervalHeader.getComments().stream()
+                        .filter(c -> c.startsWith(CONTIG_COL_COMMENT))
+                        .filter(c -> c.startsWith(START_COL_COMMENT))
+                        .filter(c -> c.startsWith(END_COL_COMMENT)).collect(Collectors.toList());
+
+                for (final String comment : commentsToWrite) {
                     writer.writeComment(comment);
                 }
+
                 // Write out the column headers as a comment
-                writer.writeComment("_ContigHeader=" + annotatedIntervalHeader.getContigColumnName());
-                writer.writeComment("_StartHeader=" + annotatedIntervalHeader.getStartColumnName());
-                writer.writeComment("_EndHeader=" + annotatedIntervalHeader.getEndColumnName());
+                writer.writeComment(CONTIG_COL_COMMENT + annotatedIntervalHeader.getContigColumnName());
+                writer.writeComment(START_COL_COMMENT + annotatedIntervalHeader.getStartColumnName());
+                writer.writeComment(END_COL_COMMENT + annotatedIntervalHeader.getEndColumnName());
 
                 // A bit more manual to write the SAM Header
                 if (annotatedIntervalHeader.getSamFileHeader() != null) {

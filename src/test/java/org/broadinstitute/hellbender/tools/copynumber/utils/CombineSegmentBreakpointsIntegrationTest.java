@@ -20,7 +20,7 @@ import java.util.List;
 import java.util.Set;
 
 public final class CombineSegmentBreakpointsIntegrationTest extends CommandLineProgramTest {
-    private static final String TEST_SUB_DIR = toolsTestDir + "org/broadinstitute/hellbender/tools/copynumber/utils/";
+    private static final String TEST_SUB_DIR = toolsTestDir + "/copynumber/utils/";
     private static final String INPUT_SEGMENTS_FILE = TEST_SUB_DIR + "combine-segment-breakpoints.tsv";
     private static final String INPUT_SEGMENTS_FILE_NO_SAMHEADER = TEST_SUB_DIR + "combine-segment-breakpoints-no-samheader.tsv";
     private static final String INPUT_SEGMENTS_FILE_ALT_SAMHEADER = TEST_SUB_DIR + "combine-segment-breakpoints-alt-samheader.tsv";
@@ -234,7 +234,7 @@ public final class CombineSegmentBreakpointsIntegrationTest extends CommandLineP
         Assert.assertEquals(regions.size(), 13);
         Assert.assertTrue(regions.getRecords().stream().allMatch(r -> r.getAnnotations().size() == 4));
         assertUnionedSegFiles(SEGMENT_CALL_1, SEGMENT_MEAN_1, SEGMENT_MEAN_2, SEGMENT_CALL_2, regions.getRecords());
-        Assert.assertEquals(regions.getComments().size(), 3);
+        Assert.assertEquals(regions.getComments().size(), 3+3);
         Assert.assertEquals(regions.getComments().get(0), " This is a comment");
         Assert.assertEquals(regions.getComments().get(1), " This is another comment");
         Assert.assertEquals(regions.getComments().get(2), " This is yet another comment");
@@ -253,7 +253,9 @@ public final class CombineSegmentBreakpointsIntegrationTest extends CommandLineP
         Assert.assertEquals(regions.size(), 13);
         Assert.assertTrue(regions.getRecords().stream().allMatch(r -> r.getAnnotations().size() == 4));
         assertUnionedSegFiles(SEGMENT_CALL_1, SEGMENT_MEAN_1, SEGMENT_MEAN_2, SEGMENT_CALL_2, regions.getRecords());
-        Assert.assertEquals(regions.getComments().size(), 3);
+
+        // Reminder:  Three comments are added to all outputs.
+        Assert.assertEquals(regions.getComments().size(), (3+3));
 
         // Order is same as seen in the input files.
         Assert.assertEquals(regions.getComments().get(0), " This is another comment");
@@ -272,9 +274,10 @@ public final class CombineSegmentBreakpointsIntegrationTest extends CommandLineP
 
         final AnnotatedIntervalCollection regions = AnnotatedIntervalCollection.create(outputFile.toPath(), Sets.newHashSet(SEGMENT_MEAN_1, SEGMENT_CALL_1, SEGMENT_MEAN_2, SEGMENT_CALL_2));
         Assert.assertEquals(regions.size(), 13);
-        Assert.assertTrue(regions.getRecords().stream().allMatch(r -> r.getAnnotations().size() == 4));
+        // Reminder:  Three comments are added to all outputs.
+        Assert.assertTrue(regions.getRecords().stream().allMatch(r -> r.getAnnotations().size() == (1+3)));
         assertUnionedSegFiles(SEGMENT_CALL_1, SEGMENT_MEAN_1, SEGMENT_MEAN_2, SEGMENT_CALL_2, regions.getRecords());
-        Assert.assertEquals(regions.getComments().size(), 1);
+        Assert.assertEquals(regions.getComments().size(), (1+3));
         Assert.assertEquals(regions.getComments().get(0), " This is a comment");
 
         // Can't simply test if the sam header is equal to the input, since the sort and group order gets overridden.
