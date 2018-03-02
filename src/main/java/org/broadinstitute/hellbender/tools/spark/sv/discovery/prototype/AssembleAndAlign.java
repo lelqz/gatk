@@ -42,9 +42,7 @@ public class AssembleAndAlign extends CommandLineProgram {
 
         // assemble them
         final FermiLiteAssembler assembler = new FermiLiteAssembler();
-        System.out.println("Cleaning flag: " + assembler.getCleaningFlag());
         assembler.setCleaningFlag((0x20 | assembler.getCleaningFlag()) & ~0x80);
-        System.out.println("Adjusted cleaning flag: " + assembler.getCleaningFlag());
         final FermiLiteAssembly assembly = assembler.createAssembly(reads);
 
         // make a map of assembled kmers
@@ -78,27 +76,44 @@ public class AssembleAndAlign extends CommandLineProgram {
             }
             final StringBuilder sb = new StringBuilder();
             String sep = "";
-            for ( final ReadSpan span :
-                    findSpans(reads.get(idx), kmerSize, minQ, maxValidQualSum, kmerMap, contigIdMap).keySet() ) {
+            final Set<ReadSpan> spans1 =
+                    findSpans(reads.get(idx), kmerSize, minQ, maxValidQualSum, kmerMap, contigIdMap).keySet();
+            if ( spans1.isEmpty() ) sb.append('/').append(trimmedLen(reads.get(idx), minQ));
+            for ( final ReadSpan span : spans1 ) {
                 sb.append(sep).append(span);
                 sep = "; ";
             }
             sb.append(" | ");
             sep = "";
-            for (final ReadSpan span :
-                    findSpans(reads.get(idx+1), kmerSize, minQ, maxValidQualSum, kmerMap, contigIdMap).keySet() ) {
+            final Set<ReadSpan> spans2 =
+                    findSpans(reads.get(idx+1), kmerSize, minQ, maxValidQualSum, kmerMap, contigIdMap).keySet();
+            if ( spans2.isEmpty() ) sb.append('/').append(trimmedLen(reads.get(idx+1), minQ));
+            for (final ReadSpan span : spans2 ) {
                 sb.append(sep).append(span);
                 sep = "; ";
+            }
+            if ( spans1.size() == 1 && spans2.size() == 1 ) {
+                final ReadSpan span1 = spans1.iterator().next();
+                final ReadSpan span2 = spans2.iterator().next();
+                if ( ReadSpan.isProperPair(span1, span2) ) {
+                    final int fragmentLen =
+                            Math.max(span1.getContigEnd(), span2.getContigEnd()) -
+                            Math.min(span1.getContigStart(), span2.getContigStart());
+                    sb.append(" (").append(fragmentLen).append(')');
+                }
             }
             System.out.println(sb);
         }
         return null;
     }
 
-    private static byte[] trimmedRead( final FastqRead read, final int minQ ) {
+    private static int trimmedLen( final FastqRead read, final int minQ ) {
         final byte[] quals = read.getQuals();
-        final int trimLen =
-                IntStream.range(0, quals.length).filter(idx -> quals[idx] < minQ).findFirst().orElse(quals.length);
+        return IntStream.range(0, quals.length).filter(idx -> quals[idx] < minQ).findFirst().orElse(quals.length);
+    }
+
+    private static byte[] trimmedRead( final FastqRead read, final int minQ ) {
+        final int trimLen = trimmedLen(read, minQ);
         return Arrays.copyOf(read.getBases(), trimLen);
     }
 
@@ -160,10 +175,7 @@ public class AssembleAndAlign extends CommandLineProgram {
             }
             readOffset += 1;
         }
-        final Iterator<FindBreakpointEvidenceSpark.IntPair> itr = spanMap.values().iterator();
-        while ( itr.hasNext() ) {
-            if ( itr.next().int2() > maxValidQualSum ) itr.remove();
-        }
+        spanMap.values().removeIf(intPair -> intPair.int2() > maxValidQualSum);
         return spanMap;
     }
 
@@ -187,9 +199,18 @@ public class AssembleAndAlign extends CommandLineProgram {
             this.isRC = isRC;
         }
 
+        public int getReadStart() { return readStart; }
+        public int getReadEnd() { return readStart + length; }
+        public int getContigStart() { return contigStart; }
+        public int getContigEnd() { return contigStart + length; }
+        public int getLength() { return length; }
+        public int getReadLength() { return readLen; }
+        public int getContigLength() { return contigLen; }
+        public int getContigId() { return contigId; }
+        public boolean isRC() { return isRC; }
+
         @Override public boolean equals( final Object obj ) {
-            if ( this == obj ) return true;
-            return obj instanceof ReadSpan && equals((ReadSpan)obj);
+            return this == obj || (obj instanceof ReadSpan && equals((ReadSpan)obj));
         }
 
         public boolean equals( final ReadSpan that ) {
@@ -219,6 +240,10 @@ public class AssembleAndAlign extends CommandLineProgram {
         @Override public String toString() {
             return readStart + "-" + (readStart + length) + "/" + readLen + " -> " +
                     (isRC ? "-" : "+") + contigId + ":" + contigStart + "-" + (contigStart + length) + "/" + contigLen;
+        }
+
+        static boolean isProperPair( final ReadSpan span1, final ReadSpan span2 ) {
+            return span1.contigId == span2.contigId && span1.isRC != span2.isRC;
         }
     }
 
