@@ -293,6 +293,7 @@ public final class CombineSegmentBreakpointsIntegrationTest extends CommandLineP
         runCombineSegmentBreakpoints(INPUT_SEGMENTS_FILE_ALT_SAMHEADER, GROUND_TRUTH_SEGMENTS_FILE, outputFile, null);
     }
 
+    /** Reference is ignored if SAM Headers are specified. */
     @Test(expectedExceptions = UserException.BadInput.class)
     public void testDisagreeingSamHeadersAndReference() throws IOException {
         final File outputFile = File.createTempFile("combineseg_", ".tsv");

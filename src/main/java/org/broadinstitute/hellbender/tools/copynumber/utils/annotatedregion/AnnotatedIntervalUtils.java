@@ -12,7 +12,6 @@ import org.broadinstitute.hellbender.utils.Utils;
 import org.broadinstitute.hellbender.utils.codecs.xsvLocatableTable.XsvLocatableTableCodec;
 import org.broadinstitute.hellbender.utils.io.Resource;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.*;
@@ -167,6 +166,9 @@ public class AnnotatedIntervalUtils {
      * @throws IOException
      */
     public static AnnotatedIntervalHeader createHeaderForWriter(final List<String> annotations, final SAMFileHeader samFileHeader, final List<String> comments) throws IOException {
+        Utils.nonNull(annotations);
+        Utils.nonNull(samFileHeader);
+        Utils.nonNull(comments);
         final Path resourceFile = Resource.getResourceContentsAsFile(AnnotatedIntervalCollection.ANNOTATED_REGION_DEFAULT_CONFIG_RESOURCE).toPath();
         return createHeaderForWriter(resourceFile, annotations, samFileHeader, comments);
     }
@@ -181,8 +183,13 @@ public class AnnotatedIntervalUtils {
      * @throws IOException
      */
     public static AnnotatedIntervalHeader createHeaderForWriter(final Path outputConfigFile, final List<String> annotations, final SAMFileHeader samFileHeader, final List<String> comments) throws IOException {
-        final File resourceFile = Resource.getResourceContentsAsFile(outputConfigFile.toString());
-        final Properties headerNameProperties = getAndValidateConfigFileContents(resourceFile.toPath());
+
+        Utils.nonNull(annotations);
+        Utils.nonNull(samFileHeader);
+        Utils.nonNull(comments);
+        Utils.nonNull(outputConfigFile);
+
+        final Properties headerNameProperties = getAndValidateConfigFileContents(outputConfigFile);
         final String contigColumnName = headerNameProperties.getProperty(XsvLocatableTableCodec.CONFIG_FILE_CONTIG_COLUMN_KEY);
         final String startColumnName = headerNameProperties.getProperty(XsvLocatableTableCodec.CONFIG_FILE_START_COLUMN_KEY);
         final String endColumnName = headerNameProperties.getProperty(XsvLocatableTableCodec.CONFIG_FILE_END_COLUMN_KEY);
