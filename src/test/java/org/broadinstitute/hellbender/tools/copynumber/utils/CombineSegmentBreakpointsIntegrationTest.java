@@ -255,7 +255,7 @@ public final class CombineSegmentBreakpointsIntegrationTest extends CommandLineP
         assertUnionedSegFiles(SEGMENT_CALL_1, SEGMENT_MEAN_1, SEGMENT_MEAN_2, SEGMENT_CALL_2, regions.getRecords());
 
         // Reminder:  Three comments are added to all outputs.
-        Assert.assertEquals(regions.getComments().size(), (3+3));
+        Assert.assertEquals(regions.getComments().size(), (3 + 3));
 
         // Order is same as seen in the input files.
         Assert.assertEquals(regions.getComments().get(0), " This is another comment");

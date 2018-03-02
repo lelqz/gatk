@@ -94,9 +94,9 @@ public class SimpleAnnotatedIntervalWriter implements AnnotatedIntervalWriter {
                 // TODO: Test replacement structured comments.
                 // Remove old structured comments, if present.
                 final List<String> commentsToWrite = annotatedIntervalHeader.getComments().stream()
-                        .filter(c -> c.startsWith(CONTIG_COL_COMMENT))
-                        .filter(c -> c.startsWith(START_COL_COMMENT))
-                        .filter(c -> c.startsWith(END_COL_COMMENT)).collect(Collectors.toList());
+                        .filter(c -> !c.startsWith(CONTIG_COL_COMMENT))
+                        .filter(c -> !c.startsWith(START_COL_COMMENT))
+                        .filter(c -> !c.startsWith(END_COL_COMMENT)).collect(Collectors.toList());
 
                 for (final String comment : commentsToWrite) {
                     writer.writeComment(comment);
