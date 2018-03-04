@@ -1,7 +1,9 @@
 package org.broadinstitute.hellbender.tools.spark.sv.discovery;
 
 import htsjdk.samtools.SAMSequenceDictionary;
+import htsjdk.samtools.SAMSequenceRecord;
 import org.apache.logging.log4j.Logger;
+import org.broadinstitute.hellbender.exceptions.UserException;
 import org.broadinstitute.hellbender.tools.spark.sv.StructuralVariationDiscoveryArgumentCollection.DiscoverVariantsFromContigsAlignmentsSparkArgumentCollection;
 import org.broadinstitute.hellbender.tools.spark.sv.discovery.inference.BreakpointComplications;
 import org.broadinstitute.hellbender.tools.spark.sv.discovery.inference.NovelAdjacencyAndAltHaplotype;
@@ -9,8 +11,18 @@ import org.broadinstitute.hellbender.tools.spark.sv.utils.SVInterval;
 import org.broadinstitute.hellbender.tools.spark.sv.utils.SVIntervalTree;
 import org.broadinstitute.hellbender.tools.spark.sv.utils.SVVCFReader;
 import org.broadinstitute.hellbender.utils.SimpleInterval;
+import org.broadinstitute.hellbender.utils.Utils;
+import org.broadinstitute.hellbender.utils.io.IOUtils;
 
+import javax.annotation.Nonnull;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 public class SvDiscoveryUtils {
 
@@ -84,5 +96,21 @@ public class SvDiscoveryUtils {
     /** The uncertainty in location due to complications. */
     private static int getAmbiguity(final BreakpointComplications complications) {
         return complications.getHomologyForwardStrandRep().length();
+    }
+
+    public static Set<String> getCanonicalChromosomes(final String nonCanonicalContigNamesFile,
+                                                      @Nonnull final SAMSequenceDictionary dictionary) {
+        final Stream<String> allContigsStream = Utils.nonNull(dictionary).getSequences().stream().map(SAMSequenceRecord::getSequenceName);
+        if (nonCanonicalContigNamesFile == null)
+            return allContigsStream.collect(Collectors.toCollection(LinkedHashSet::new));
+
+        try (final Stream<String> nonCanonical = Files.lines(IOUtils.getPath(( Utils.nonNull(nonCanonicalContigNamesFile) )))) {
+            final HashSet<String> toIgnore = nonCanonical.collect(Collectors.toCollection(HashSet::new));
+            return allContigsStream
+                    .filter(tig -> !toIgnore.contains(tig))
+                    .collect(Collectors.toCollection(LinkedHashSet::new));
+        } catch ( final IOException ioe ) {
+            throw new UserException("Can't read nonCanonicalContigNamesFile file "+nonCanonicalContigNamesFile, ioe);
+        }
     }
 }
