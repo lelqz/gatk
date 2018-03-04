@@ -322,7 +322,7 @@ public final class AssemblyContigAlignmentSignatureClassifier {
                                     new AssemblyContigWithFineTunedAlignments(
                                             new AlignedContig(tig.contigName, tig.contigSequence, goodAlignments,
                                                     tig.hasEquallyGoodAlnConfigurations),
-                                            insertionMappings);
+                                            insertionMappings, null);
                         });
 
         // first take down non-informative assembly contigs

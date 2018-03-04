@@ -2,7 +2,6 @@ package org.broadinstitute.hellbender.tools.spark.sv.discovery.alignment;
 
 import com.esotericsoftware.kryo.DefaultSerializer;
 import com.esotericsoftware.kryo.Kryo;
-import com.esotericsoftware.kryo.Serializer;
 import com.esotericsoftware.kryo.io.Input;
 import com.esotericsoftware.kryo.io.Output;
 import org.broadinstitute.hellbender.utils.SimpleInterval;
@@ -11,26 +10,35 @@ import org.broadinstitute.hellbender.utils.Utils;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 
 @DefaultSerializer(AssemblyContigWithFineTunedAlignments.Serializer.class)
 public final class AssemblyContigWithFineTunedAlignments {
     private static final AlignedContig.Serializer contigSerializer = new AlignedContig.Serializer();
     public static final List<String> emptyInsertionMappings = Collections.emptyList();
 
-    final AlignedContig contig;
+    private final AlignedContig contig;
     // alignments that were given by aligner but thought to be non-good,
     // and better treated as not-so-reliable mappings for inserted sequence;
     // useful for annotation but not essential for reliable event interpretation
-    final List<String> insertionMappings;
+    private final List<String> insertionMappings;
+
+    /**
+     * for signalling (i.e. not null) that the alignments went through the special treatment in
+     * {@link AssemblyContigAlignmentsConfigPicker#specialChanelForSingleNonCanonicalMappings(Set, List, int)}
+     */
+    private final String saTAGForGoodMappingToNonCanonicalChromosome;
 
     public AssemblyContigWithFineTunedAlignments(final AlignedContig contig) {
-        this(contig, emptyInsertionMappings);
+        this(contig, emptyInsertionMappings, null);
     }
 
     public AssemblyContigWithFineTunedAlignments(final AlignedContig contig,
-                                                 final List<String> insertionMappings) {
+                                                 final List<String> insertionMappings,
+                                                 final String saTAGForGoodMappingToNonCanonicalChromosome) {
         this.contig = contig;
         this.insertionMappings = Utils.nonNull(insertionMappings);
+        this.saTAGForGoodMappingToNonCanonicalChromosome = saTAGForGoodMappingToNonCanonicalChromosome;
     }
 
     AssemblyContigWithFineTunedAlignments(final Kryo kryo, final Input input) {
@@ -42,6 +50,8 @@ public final class AssemblyContigWithFineTunedAlignments {
                 insertionMappings.add(input.readString());
             }
         }
+
+        saTAGForGoodMappingToNonCanonicalChromosome = (input.readBoolean()) ? null : input.readString();
     }
 
     public AlignedContig getSourceContig() {
@@ -55,6 +65,10 @@ public final class AssemblyContigWithFineTunedAlignments {
     // after fine tuning, a contig may have no good alignment left, or only 1
     public final boolean isInformative() {
         return contig.isInformative();
+    }
+
+    public final String getMaybeNullSaTAGForGoodMappingToNonCanonicalChromosome() {
+        return saTAGForGoodMappingToNonCanonicalChromosome;
     }
 
     public final boolean hasOnly2GoodAlignments () {
@@ -219,6 +233,12 @@ public final class AssemblyContigWithFineTunedAlignments {
         for (final String mapping : insertionMappings) {
             output.writeString(mapping);
         }
+        if (saTAGForGoodMappingToNonCanonicalChromosome == null) {
+            output.writeBoolean(false);
+        } else {
+            output.writeBoolean(true);
+            output.writeString(saTAGForGoodMappingToNonCanonicalChromosome);
+        }
     }
 
     public static final class Serializer extends com.esotericsoftware.kryo.Serializer<AssemblyContigWithFineTunedAlignments> {
@@ -235,6 +255,12 @@ public final class AssemblyContigWithFineTunedAlignments {
 
     @Override
     public String toString() {
-        return contig.toString() + "\n" + insertionMappings.toString();
+        final StringBuilder sb = new StringBuilder("AssemblyContigWithFineTunedAlignments{");
+        sb.append("contig=").append(contig);
+        sb.append(", insertionMappings=").append(insertionMappings);
+        if (saTAGForGoodMappingToNonCanonicalChromosome != null)
+            sb.append(", saTAGForGoodMappingToNonCanonicalChromosome='").append(saTAGForGoodMappingToNonCanonicalChromosome).append('\'');
+        sb.append('}');
+        return sb.toString();
     }
 }

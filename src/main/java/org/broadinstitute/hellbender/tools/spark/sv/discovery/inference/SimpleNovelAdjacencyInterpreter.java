@@ -71,9 +71,15 @@ public final class SimpleNovelAdjacencyInterpreter {
                             final ChimericAlignment simpleChimera = ChimericAlignment.extractSimpleChimera(tig, refSeqDict);
                             final byte[] contigSequence = tig.getSourceContig().contigSequence;
 
+                            final String maybeNullSaTAGForGoodMappingToNonCanonicalChromosome =
+                                    tig.getMaybeNullSaTAGForGoodMappingToNonCanonicalChromosome();
+
                             final NovelAdjacencyAndAltHaplotype novelAdjacencyAndAltHaplotype =
                                     new NovelAdjacencyAndAltHaplotype(simpleChimera, contigSequence, refSeqDict);
-                            return new Tuple2<>(novelAdjacencyAndAltHaplotype, simpleChimera);
+                            return new Tuple2<>(novelAdjacencyAndAltHaplotype,
+                                    new Tuple2<>(simpleChimera,
+                                            maybeNullSaTAGForGoodMappingToNonCanonicalChromosome == null ? SimpleNovelAdjacencyAndChimericAlignmentEvidence.NO_GOOD_MAPPING_TO_NONCANONICAL_CHROMOSOME
+                                                                                                         : maybeNullSaTAGForGoodMappingToNonCanonicalChromosome));
                         })
                         .groupByKey()       // group the same novel adjacency produced by different contigs together
                         .map(noveltyAndEvidence ->

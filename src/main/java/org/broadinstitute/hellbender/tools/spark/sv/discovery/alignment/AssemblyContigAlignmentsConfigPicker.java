@@ -151,15 +151,30 @@ public class AssemblyContigAlignmentsConfigPicker {
      * good: the ones present the picked configuration
      * bad: the brings more noise than information,
      *      they can be turned into string representation following the format as in {@link AlignmentInterval#toPackedString()}
+     *
+     * Note that a special case needs attention:
+     *     if {@link #saTAGForGoodMappingToNonCanonicalChromosome} is not null,
+     *     it is indicating an equally good, or better non-chimeric mapping to a non-canonical chromosome exists,
+     *     but to preserve the SV signal, we keep the chimeric alignments to canonical chromosomes and
+     *     signal the situation to downstream units.
      */
+    @VisibleForTesting
     static final class GoodAndBadMappings {
 
         final List<AlignmentInterval> goodMappings;
         final List<AlignmentInterval> badMappings;
+        private final String saTAGForGoodMappingToNonCanonicalChromosome;
 
-        GoodAndBadMappings(final List<AlignmentInterval> goodMappings, final List<AlignmentInterval> badMappings) {
+        GoodAndBadMappings(final List<AlignmentInterval> goodMappings, final List<AlignmentInterval> badMappings,
+                           final AlignmentInterval goodMappingToNonCanonicalChr) {
             this.goodMappings = goodMappings;
             this.badMappings = badMappings;
+
+            this.saTAGForGoodMappingToNonCanonicalChromosome = goodMappingToNonCanonicalChr == null? null: goodMappingToNonCanonicalChr.toSATagString();
+        }
+
+        String getMaybeNullSaTAGForGoodMappingToNonCanonicalChromosome() {
+            return saTAGForGoodMappingToNonCanonicalChromosome;
         }
 
         @Override
@@ -170,13 +185,15 @@ public class AssemblyContigAlignmentsConfigPicker {
             final GoodAndBadMappings that = (GoodAndBadMappings) o;
 
             if (!goodMappings.equals(that.goodMappings)) return false;
-            return badMappings.equals(that.badMappings);
+            if (!badMappings.equals(that.badMappings)) return false;
+            return saTAGForGoodMappingToNonCanonicalChromosome != null ? saTAGForGoodMappingToNonCanonicalChromosome.equals(that.saTAGForGoodMappingToNonCanonicalChromosome) : that.saTAGForGoodMappingToNonCanonicalChromosome == null;
         }
 
         @Override
         public int hashCode() {
             int result = goodMappings.hashCode();
             result = 31 * result + badMappings.hashCode();
+            result = 31 * result + (saTAGForGoodMappingToNonCanonicalChromosome != null ? saTAGForGoodMappingToNonCanonicalChromosome.hashCode() : 0);
             return result;
         }
     }
@@ -184,14 +201,25 @@ public class AssemblyContigAlignmentsConfigPicker {
     /**
      * Pick the best configurations based on a heuristic scoring scheme implemented in
      * {@link #computeScoreOfConfiguration(List, Set, int)}.
+     *
+     * Note that a special chanel exists, and explained in
+     * {@link #specialChanelForSingleNonCanonicalMappings(Set, List, int)}.
+     *
      * @return a 2-D list, where in the case when multiple configurations are equally top-scored, all such configurations are picked up
      */
     @VisibleForTesting
     static List<GoodAndBadMappings> pickBestConfigurations(final AlignedContig alignedContig,
                                                            final Set<String> canonicalChromosomes,
                                                            final Double scoreDiffTolerance) {
+        // nothing to score if only one alignment
+        if (alignedContig.alignmentIntervals.size() == 1) {
+            return Collections.singletonList(
+                    new GoodAndBadMappings(Collections.singletonList(alignedContig.alignmentIntervals.get(0)),
+                                           Collections.emptyList(), null)
+            );
+        }
 
-        // group 1: get max aligner score of mappings to canonical chromosomes and speed up in case of too many mappings
+        // step 1: get max aligner score of mappings to canonical chromosomes and speed up in case of too many mappings
         final int maxCanonicalChrAlignerScore = alignedContig.alignmentIntervals.stream()
                 .filter(alignmentInterval -> canonicalChromosomes.contains(alignmentInterval.referenceSpan.getContig()))
                 .mapToInt(ai -> ai.alnScore).max().orElse(0); // possible that no mapping to canonical chromosomes
@@ -205,38 +233,16 @@ public class AssemblyContigAlignmentsConfigPicker {
                 .filter(alignmentInterval -> canonicalChromosomes.contains(alignmentInterval.referenceSpan.getContig()))
                 .mapToInt(ai -> ai.alnScore).max().orElse(0); // possible that no mapping to canonical chromosomes
 
-        // group 2: generate, and score configurations
-        final List<List<AlignmentInterval>> allConfigurations = Sets.powerSet(new HashSet<>(goodMappings))
-                .stream().map(ArrayList::new)
-                // make sure within each configuration, alignments would be sorted as they would be in a corresponding AlignedContig
-                .map(ls -> ls.stream().sorted(AlignedContig.getAlignmentIntervalComparator()).collect(Collectors.toList()))
-                .collect(Collectors.toList());
+        // special chanel for a special case
+        AlignmentInterval goodMappingToNonCanonicalChromosome =
+                specialChanelForSingleNonCanonicalMappings(canonicalChromosomes, goodMappings, newMaxCanonicalChrAlignerScore);
+        if (goodMappingToNonCanonicalChromosome != null) { // take it out of consideration for both good and bad candicates
+            goodMappings.remove(goodMappingToNonCanonicalChromosome);
+        }
 
-        final List<Double> scores = allConfigurations.stream()
-                .map(configuration -> computeScoreOfConfiguration(configuration, canonicalChromosomes, newMaxCanonicalChrAlignerScore))
-                .collect(SVUtils.arrayListCollector(allConfigurations.size()));
-
-        // group 3: pick the best-scored configuration(s) (if multiple configurations have equally good scores, return all of them)
-        final double maxScore = scores.stream().mapToDouble(Double::doubleValue).max()
-                .orElseThrow(() -> new GATKException("Cannot find best-scoring configuration on alignments of contig: " + alignedContig.contigName));
-
-        return IntStream.range(0, allConfigurations.size())
-                .filter(i -> {
-                    final Double s = scores.get(i);
-                    // two configurations with would-be-same-scores can differ by a tolerance due to the sin of comparing
-                    // could-be-close floating point values
-                    // (see http://www.cygnus-software.com/papers/comparingfloats/Comparing%20floating%20point%20numbers.htm)
-                    final Double tol = Math.max(Math.ulp(s), scoreDiffTolerance);
-                    return s >= maxScore || maxScore - s <= tol;
-                })
-                .mapToObj(p -> {
-                    final ArrayList<AlignmentInterval> copy = new ArrayList<>(goodMappings);
-                    final List<AlignmentInterval> pickedAlignments = allConfigurations.get(p);
-                    copy.removeAll(pickedAlignments); // remove picked, left are bad
-                    copy.addAll(badMappings); // add original bad mappings
-                    return new GoodAndBadMappings(pickedAlignments, copy);
-                })
-                .collect(Collectors.toList());
+        // step 2: generate, and score configurations
+        return getGoodAndBadMappings(goodMappings, badMappings, goodMappingToNonCanonicalChromosome, canonicalChromosomes,
+                newMaxCanonicalChrAlignerScore, scoreDiffTolerance, alignedContig.contigName);
     }
 
     // speed up if number of alignments is too high (>10)
@@ -262,7 +268,47 @@ public class AssemblyContigAlignmentsConfigPicker {
             goods = alignedContig.alignmentIntervals;
             bads = Collections.emptyList();
         }
-        return new GoodAndBadMappings(goods, bads);
+        return new GoodAndBadMappings(goods, bads, null);
+    }
+
+    private static List<GoodAndBadMappings> getGoodAndBadMappings(final List<AlignmentInterval> goodMappings,
+                                                                  final List<AlignmentInterval> badMappings,
+                                                                  final AlignmentInterval goodMappingToNonCanonicalChromosome,
+                                                                  final Set<String> canonicalChromosomes,
+                                                                  final int maxCanonicalChrAlignerScore,
+                                                                  final Double scoreDiffTolerance,
+                                                                  final String contigName) {
+        final List<List<AlignmentInterval>> allConfigurations = Sets.powerSet(new HashSet<>(goodMappings))
+                .stream().map(ArrayList::new)
+                // make sure within each configuration, alignments would be sorted as they would be in a corresponding AlignedContig
+                .map(ls -> ls.stream().sorted(AlignedContig.getAlignmentIntervalComparator()).collect(Collectors.toList()))
+                .collect(Collectors.toList());
+
+        final List<Double> scores = allConfigurations.stream()
+                .map(configuration -> computeScoreOfConfiguration(configuration, canonicalChromosomes, maxCanonicalChrAlignerScore))
+                .collect(SVUtils.arrayListCollector(allConfigurations.size()));
+
+        // step 3: pick the best-scored configuration(s) (if multiple configurations have equally good scores, return all of them)
+        final double maxScore = scores.stream().mapToDouble(Double::doubleValue).max()
+                .orElseThrow(() -> new GATKException("Cannot find best-scoring configuration on alignments of contig: " + contigName));
+
+        return IntStream.range(0, allConfigurations.size())
+                .filter(i -> {
+                    final Double s = scores.get(i);
+                    // two configurations with would-be-same-scores can differ by a tolerance due to the sin of comparing
+                    // could-be-close floating point values
+                    // (see http://www.cygnus-software.com/papers/comparingfloats/Comparing%20floating%20point%20numbers.htm)
+                    final Double tol = Math.max(Math.ulp(s), scoreDiffTolerance);
+                    return s >= maxScore || maxScore - s <= tol;
+                })
+                .mapToObj(p -> {
+                    final ArrayList<AlignmentInterval> copy = new ArrayList<>(goodMappings);
+                    final List<AlignmentInterval> pickedAlignments = allConfigurations.get(p);
+                    copy.removeAll(pickedAlignments); // remove picked, left are bad
+                    copy.addAll(badMappings); // add original bad mappings
+                    return new GoodAndBadMappings(pickedAlignments, copy, goodMappingToNonCanonicalChromosome);
+                })
+                .collect(Collectors.toList());
     }
 
     /**
@@ -287,17 +333,19 @@ public class AssemblyContigAlignmentsConfigPicker {
         return tigExplainQual - redundancy;
     }
 
+    static final double COVERAGE_MQ_NORMALIZATION_CONST = 60.0;
+
     private static double computeTigExplainQualOfOneConfiguration(final List<AlignmentInterval> configuration,
                                                                   final Set<String> canonicalChromosomes,
                                                                   final int maxCanonicalChrAlignerScore) {
         double tigExplainedQual = 0;
         for (final AlignmentInterval alignmentInterval : configuration) {
-            final int len = alignmentInterval.endInAssembledContig - alignmentInterval.startInAssembledContig + 1;
+            final int len = alignmentInterval.getSizeOnRead();
             final double weight;
             if (canonicalChromosomes.contains(alignmentInterval.referenceSpan.getContig())) {
-                weight = alignmentInterval.mapQual/60.0;
+                weight = alignmentInterval.mapQual/COVERAGE_MQ_NORMALIZATION_CONST;
             } else {
-                weight = Math.max(alignmentInterval.mapQual/60.0,
+                weight = Math.max(alignmentInterval.mapQual/COVERAGE_MQ_NORMALIZATION_CONST,
                                   alignmentInterval.alnScore > maxCanonicalChrAlignerScore ? 1 : 0);
             }
             tigExplainedQual += weight * len;
@@ -332,7 +380,7 @@ public class AssemblyContigAlignmentsConfigPicker {
 
     private static AssemblyContigWithFineTunedAlignments updateContigMappingsWithGapSplit(final String contigName, final byte[] contigSeq,
                                                                                           final GoodAndBadMappings configuration,
-                                                                                          final boolean setResultContigAsAmbigous) {
+                                                                                          final boolean setResultContigAsAmbiguous) {
         final GoodAndBadMappings goodAndBadMappings;
         if ( configuration.goodMappings.stream().anyMatch(AssemblyContigAlignmentsConfigPicker::alignmentContainsLargeGap) ) {
             goodAndBadMappings = splitGaps(configuration);
@@ -341,9 +389,9 @@ public class AssemblyContigAlignmentsConfigPicker {
         }
 
         return new AssemblyContigWithFineTunedAlignments(
-                new AlignedContig(contigName, contigSeq, goodAndBadMappings.goodMappings, setResultContigAsAmbigous),
-                goodAndBadMappings.badMappings.stream().map(AlignmentInterval::toPackedString).collect(Collectors.toList())
-        );
+                new AlignedContig(contigName, contigSeq, goodAndBadMappings.goodMappings, setResultContigAsAmbiguous),
+                goodAndBadMappings.badMappings.stream().map(AlignmentInterval::toPackedString).collect(Collectors.toList()),
+                goodAndBadMappings.getMaybeNullSaTAGForGoodMappingToNonCanonicalChromosome());
     }
 
     /**
@@ -416,7 +464,7 @@ public class AssemblyContigAlignmentsConfigPicker {
                 bad.addAll( Lists.newArrayList(pair._2) );
             }
         }
-        return new GoodAndBadMappings(good, bad);
+        return new GoodAndBadMappings(good, bad, null);
     }
 
     private static boolean alignmentContainsLargeGap(final AlignmentInterval alignment) {
@@ -461,7 +509,42 @@ public class AssemblyContigAlignmentsConfigPicker {
         }
     }
 
-    // TODO: 3/1/18 implement another simple fix that classify contigs with the following signature as ambiguous
-    // one configuration with single good mapping to non-canonical chromosome,
-    // another configuration with split alignments to canonical chromosomes
+    /**
+     * There are locations on the non-canonical chromosomes of the HG38 reference that is similar to a location
+     * on the canonical chromosomes, except that it has rearranged (or deleted/duplicated) parts of the canonical chromosomes.
+     * In other words, the non-canonical chromosome captures an SV--relative to the canonical chromosomes--of relatively high frequency.
+     *
+     * The sample under analysis could have the allele of this non-canonical version,
+     * and be marked as having an SV on the corresponding location on the canonical chromosome.
+     *
+     * An assembly contig from this sample may have two equally well scored alignment configurations, where
+     *  one configuration has split alignments to canonical chromosomes, hence indicating the SV, whereas
+     *  the other configuration has a single, often very good (or even better) alignment to a non-canonical chromosome.
+     * We send down the chimeric alignment configuration for inference, but notes down that a non-canonical chromosome
+     * in the reference bundle input could have already captured the SV on this sample.
+     *
+     * @return  {@code null} if the non-canonical chromosome mapping doesn't offer a better score,
+     *          otherwise the non-canonical chromosome mapping
+     */
+    @VisibleForTesting
+    static AlignmentInterval specialChanelForSingleNonCanonicalMappings(final Set<String> canonicalChromosomes,
+                                                                        final List<AlignmentInterval> goodMappings,
+                                                                        final int maxCanonicalChrAlignerScore) {
+        final List<AlignmentInterval> canonicalMappings = new ArrayList<>(goodMappings.size());
+        final List<AlignmentInterval> nonCanonicalMapping = new ArrayList<>();
+        for (final AlignmentInterval alignment : goodMappings) {
+            if ( canonicalChromosomes.contains(alignment.referenceSpan.getContig()) )
+                canonicalMappings.add(alignment);
+            else
+                nonCanonicalMapping.add(alignment);
+        }
+        if ( nonCanonicalMapping.size() == 1 &&
+                (canonicalMappings.size() > 1 || alignmentContainsLargeGap(canonicalMappings.get(0))) ) {
+            final double canonicalScore = computeScoreOfConfiguration(canonicalMappings, canonicalChromosomes, maxCanonicalChrAlignerScore);
+            final double nonCanonicalScore = computeScoreOfConfiguration(nonCanonicalMapping, canonicalChromosomes, maxCanonicalChrAlignerScore);
+            return ( canonicalScore > nonCanonicalScore ) ? null : nonCanonicalMapping.get(0);
+        } else {
+            return null;
+        }
+    }
 }

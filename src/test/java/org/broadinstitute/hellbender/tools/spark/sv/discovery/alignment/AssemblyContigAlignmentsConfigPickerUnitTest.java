@@ -5,6 +5,7 @@ import htsjdk.samtools.TextCigarCodec;
 import org.apache.commons.collections4.IterableUtils;
 import org.broadinstitute.hellbender.GATKBaseTest;
 import org.broadinstitute.hellbender.engine.spark.SparkContextFactory;
+import org.broadinstitute.hellbender.tools.spark.sv.discovery.SVTestUtils;
 import org.broadinstitute.hellbender.utils.SimpleInterval;
 import org.broadinstitute.hellbender.utils.read.CigarUtils;
 import org.testng.Assert;
@@ -22,6 +23,7 @@ import static org.broadinstitute.hellbender.tools.spark.sv.discovery.SVTestUtils
 import static org.broadinstitute.hellbender.tools.spark.sv.discovery.SVTestUtils.makeDummySequence;
 import static org.broadinstitute.hellbender.tools.spark.sv.discovery.SimpleSVDiscoveryTestDataProvider.b38_canonicalChromosomes;
 import static org.broadinstitute.hellbender.tools.spark.sv.discovery.SimpleSVDiscoveryTestDataProvider.b38_seqDict;
+import static org.broadinstitute.hellbender.tools.spark.sv.discovery.alignment.AssemblyContigAlignmentsConfigPicker.GoodAndBadMappings;
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertTrue;
 
@@ -108,18 +110,18 @@ public class AssemblyContigAlignmentsConfigPickerUnitTest extends GATKBaseTest {
 
         final Iterable<AlignmentInterval> split = ContigAlignmentsModifier.splitGappedAlignment(alignmentTwo, GAPPED_ALIGNMENT_BREAK_DEFAULT_SENSITIVITY, 1103);
         data.add(new Object[]{
-                new AssemblyContigAlignmentsConfigPicker.GoodAndBadMappings(Arrays.asList(alignmentOne, alignmentTwo), Collections.emptyList()),
-                new AssemblyContigAlignmentsConfigPicker.GoodAndBadMappings(Collections.singletonList(alignmentOne), Lists.newArrayList(split))
+                new GoodAndBadMappings(Arrays.asList(alignmentOne, alignmentTwo), Collections.emptyList(), null),
+                new GoodAndBadMappings(Collections.singletonList(alignmentOne), Lists.newArrayList(split), null)
         });
 
         return data.toArray(new Object[data.size()][]);
     }
 
     @Test(dataProvider = "gapSplitFineTuning", groups = "sv")
-    public void testGapSplit(final AssemblyContigAlignmentsConfigPicker.GoodAndBadMappings inputConfiguration,
-                             final AssemblyContigAlignmentsConfigPicker.GoodAndBadMappings expectedOutputConfiguration) {
+    public void testGapSplit(final GoodAndBadMappings inputConfiguration,
+                             final GoodAndBadMappings expectedOutputConfiguration) {
 
-        final AssemblyContigAlignmentsConfigPicker.GoodAndBadMappings configuration = AssemblyContigAlignmentsConfigPicker.splitGaps(inputConfiguration);
+        final GoodAndBadMappings configuration = AssemblyContigAlignmentsConfigPicker.splitGaps(inputConfiguration);
         Assert.assertEquals(configuration, expectedOutputConfiguration);
     }
 
@@ -139,15 +141,15 @@ public class AssemblyContigAlignmentsConfigPickerUnitTest extends GATKBaseTest {
                 122, 200,  TextCigarCodec.decode("222S78M"),
                 true, 60, 0, 78, ContigAlignmentsModifier.AlnModType.NONE);
 
-        final AssemblyContigAlignmentsConfigPicker.GoodAndBadMappings rep1 =
-                new AssemblyContigAlignmentsConfigPicker.GoodAndBadMappings(Arrays.asList(intervalOne, intervalThree),
-                        Collections.singletonList(intervalThree));
-        final AssemblyContigAlignmentsConfigPicker.GoodAndBadMappings rep2 =
-                new AssemblyContigAlignmentsConfigPicker.GoodAndBadMappings(Arrays.asList(intervalOne, intervalTwo, intervalThree),
-                        Collections.emptyList());
+        final GoodAndBadMappings rep1 =
+                new GoodAndBadMappings(Arrays.asList(intervalOne, intervalThree),
+                        Collections.singletonList(intervalThree), null);
+        final GoodAndBadMappings rep2 =
+                new GoodAndBadMappings(Arrays.asList(intervalOne, intervalTwo, intervalThree),
+                        Collections.emptyList(), null);
 
         int threshold = 0;
-        List<AssemblyContigAlignmentsConfigPicker.GoodAndBadMappings> result = AssemblyContigAlignmentsConfigPicker.breakTieByPreferringLessAlignments(Arrays.asList(rep1, rep2), threshold);
+        List<GoodAndBadMappings> result = AssemblyContigAlignmentsConfigPicker.breakTieByPreferringLessAlignments(Arrays.asList(rep1, rep2), threshold);
         Assert.assertEquals(IterableUtils.size(result), 2);
 
         threshold = 10;
@@ -202,5 +204,43 @@ public class AssemblyContigAlignmentsConfigPickerUnitTest extends GATKBaseTest {
     @Test(dataProvider = "forTestingNotDiscardForBadMQ", groups = "sv")
     public void testNotDiscardForBadMQ(final AlignedContig contig, final boolean shouldKeep) {
         Assert.assertEquals(AssemblyContigAlignmentsConfigPicker.notDiscardForBadMQ(contig), shouldKeep);
+    }
+
+    @DataProvider(name = "forTestSpecialChanelForSingleNonCanonicalMappings")
+    private Object[][] forTestSpecialChanelForSingleNonCanonicalMappings() {
+        final List<Object[]> data = new ArrayList<>(20);
+
+        // note chromosome names is hacked to use test seq dict
+
+        final AlignmentInterval altOne = SVTestUtils.fromSAMRecordString("asm000099:tig00029\t2064\tchr1_KI270762v1_alt\t207249\t2\t38H252M229H\t*\t0\t0\tGAGCATCTGACAGCCTGGAACAGCACCCATACGCCCAGATGAGCATCTGACAGCCTGAAACAGCACCCTGCACCCCCAGGTGTGCAACTGACAGCCTGGAACAGCACACACTCACCCAGGCCAGCATCTGATGGCCTGGAACGGCACCCACACCCCCAGGTAAGCATCCGACATCCTGAAACAGCTCCCACACCCCCAGGCGAGCATCTGACAGCCTGGAGCAGTGCCCACACCCCCAGGTGAGCATCTGAC\t*\tSA:Z:chr1,2655749,-,125S394M,1,42;chr1,2667827,-,66M453S,0,3;chr1,2761512,-,95S50M374S,0,3;chrUn_JTFH01001111v1_decoy,1,+,22S273M224S,46,12;chr1_KI270762v1_alt,207251,-,66M453S,0,2;\tMD:Z:57G11A2T13C20C12G0G19T19G30A7T7C15C0A4T21\tRG:Z:GATKSVContigAlignments\tNM:i:15\tAS:i:177\tXS:i:172", true);
+        final AlignmentInterval altTwo = SVTestUtils.fromSAMRecordString("asm000099:tig00029\t2064\tchr1_KI270762v1_alt\t207251\t0\t66M453H\t*\t0\t0\tGCATCTGACAGCCTGCAACCGCACCCATACGCCCAGATGAGCATCTGACAGCCTGGAACAGCACCC\t*\tSA:Z:chr1,2655749,-,125S394M,1,42;chr1,2667827,-,66M453S,0,3;chr1,2761512,-,95S50M374S,0,3;chrUn_JTFH01001111v1_decoy,1,+,22S273M224S,46,12;chr1_KI270762v1_alt,207249,-,38S252M229S,2,15;\tMD:Z:15G3A46\tRG:Z:GATKSVContigAlignments\tNM:i:2\tAS:i:56\tXS:i:56", true);
+        final AlignmentInterval canonicalOne = SVTestUtils.fromSAMRecordString("asm000099:tig00029\t16\tchr21\t2655749\t1\t125S394M\t*\t0\t0\tGCATCTGACAGCCTGCAACCGCACCCATACGCCCAGATGAGCATCTGACAGCCTGGAACAGCACCCATACGCCCAGATGAGCATCTGACAGCCTGAAACAGCACCCTGCACCCCCAGGTGTGCAACTGACAGCCTGGAACAGCACACACTCACCCAGGCCAGCATCTGATGGCCTGGAACGGCACCCACACCCCCAGGTAAGCATCCGACATCCTGAAACAGCTCCCACACCCCCAGGCGAGCATCTGACAGCCTGGAGCAGTGCCCACACCCCCAGGTGAGCATCTGACATCGTGGAGCAGCACCCACAGCCCAAGGTGAGCATCTGACAACCAGGAGCAGCACCCACACACCCAGGCGAGCATCAGAATGCACGGAGCATCACCCACACCCCCAGGCGAGCATCCGACAGCCTGGAGCAGCACCCACACCCCCAGGCGAGCATCTGACAGCCTGGAGCAGTGCCCACACCCCCAGGTGAGCATCTGACAGCGTGGAGCAGCACCCACAGCCCAAGGT\t*\tSA:Z:chr1,2667827,-,66M453S,0,3;chr1,2761512,-,95S50M374S,0,3;chrUn_JTFH01001111v1_decoy,1,+,22S273M224S,46,12;chr1_KI270762v1_alt,207249,-,38S252M229S,2,15;chr1_KI270762v1_alt,207251,-,66M453S,0,2;\tMD:Z:15G4C3A8T0G12T5G1A9A2A5G1A4G2G1G0T3G1G4G44A22G59C14T3C10G10T2C42T1C8T0G1T9C0A7A1A0G14G3C4A3A11C4\tRG:Z:GATKSVContigAlignments\tNM:i:42\tAS:i:184\tXS:i:177", true);
+        final AlignmentInterval canonicalTwo = SVTestUtils.fromSAMRecordString("asm000099:tig00029\t2064\tchr21\t2667827\t0\t66M453H\t*\t0\t0\tGCATCTGACAGCCTGCAACCGCACCCATACGCCCAGATGAGCATCTGACAGCCTGGAACAGCACCC\t*\tSA:Z:chr1,2655749,-,125S394M,1,42;chr1,2761512,-,95S50M374S,0,3;chrUn_JTFH01001111v1_decoy,1,+,22S273M224S,46,12;chr1_KI270762v1_alt,207249,-,38S252M229S,2,15;chr1_KI270762v1_alt,207251,-,66M453S,0,2;\tMD:Z:10A4G3A46\tRG:Z:GATKSVContigAlignments\tNM:i:3\tAS:i:51\tXS:i:51", true);
+        final AlignmentInterval canonicalThree = SVTestUtils.fromSAMRecordString("asm000099:tig00029\t2064\tchr21\t2761512\t0\t95H50M374H\t*\t0\t0\tAAACAGCACCCTGCACCCCCAGGTGTGCAACTGACAGCCTGGAACAGCAC\t*\tSA:Z:chr1,2655749,-,125S394M,1,42;chr1,2667827,-,66M453S,0,3;chrUn_JTFH01001111v1_decoy,1,+,22S273M224S,46,12;chr1_KI270762v1_alt,207249,-,38S252M229S,2,15;chr1_KI270762v1_alt,207251,-,66M453S,0,2;\tMD:Z:25A3T11A8\tRG:Z:GATKSVContigAlignments\tNM:i:3\tAS:i:35\tXS:i:35", true);
+
+        data.add(new Object[]{Arrays.asList(canonicalOne, canonicalTwo, canonicalThree, altOne, altTwo), 184, null});
+
+        final AlignmentInterval canonical = SVTestUtils.fromSAMRecordString("asm002362:tig00002\t16\tchr21\t1422222\t60\t75M56I139M\t*\t0\t0\tATGCTGGGGAATTTGTGTGCTCCTTGGGTGGGGACGAGCATGGAAGGCGCGTGGGACTGAAGCCTTGAAGACCCCGCAGGCGCCTCTCCTGGACAGACCTCGTGCAGGCGCCTCTCCTGGACCGACCTCGTGCAGGCGCCTCTCCTGGACAGACCTCGTGCAGGCGCCTCTCCTGGACCGACCTCGTGCAGGCGCCGCGCTGGACCGACCTCGTGCAGGCGCCGCGCTGGGCCATGGGGAGAGCGAGAGCCTGGTGTGCCCCTCAGGGAC\t*\tSA:Z:chr2_KI270774v1_alt,105288,-,114M1I27M1I127M,56,13;\tMD:Z:214\tRG:Z:GATKSVContigAlignments\tNM:i:56\tAS:i:142\tXS:i:0\n", true);
+        final AlignmentInterval nonCanonical = SVTestUtils.fromSAMRecordString("asm002362:tig00002\t2064\tchr2_KI270774v1_alt\t105288\t56\t114M1I27M1I127M\t*\t0\t0\tATGCTGGGGAATTTGTGTGCTCCTTGGGTGGGGACGAGCATGGAAGGCGCGTGGGACTGAAGCCTTGAAGACCCCGCAGGCGCCTCTCCTGGACAGACCTCGTGCAGGCGCCTCTCCTGGACCGACCTCGTGCAGGCGCCTCTCCTGGACAGACCTCGTGCAGGCGCCTCTCCTGGACCGACCTCGTGCAGGCGCCGCGCTGGACCGACCTCGTGCAGGCGCCGCGCTGGGCCATGGGGAGAGCGAGAGCCTGGTGTGCCCCTCAGGGAC\t*\tSA:Z:chr2,1422222,-,75M56I139M,60,56;\tMD:Z:94C17G1G6T13T3G1G34A3T9T68T8\tRG:Z:GATKSVContigAlignments\tNM:i:13\tAS:i:179\tXS:i:142", true);
+        data.add(new Object[]{Arrays.asList(canonical, nonCanonical), 142, nonCanonical});
+
+        final AlignmentInterval one = SVTestUtils.fromSAMRecordString("asm008084:tig00048\t16\tchr20\t188506254\t60\t182S253M\t*\t0\t0\tGTTGTAGATTAACTGATGTCCAAATAGGAGGAAATAGCATAAGATCATGGAAGAGAGAGGGCAGTAGATTACCTGATGTCGAAATAGCAGGTAAGAGCATACTGTCCTGGAAGAGAGGGCTGTAGATTACCTGATGTCCAAATAGTAGGTAATATCGTAATGTGCTGGAAGAGAGAGGGCTTTAGATTACCTGATGTCCAAATAGGAGGAAATAGCATAAGGTCCTGGAGGACAAAGGTGTTGTAGATTACATGATGTCCAAATAGGACGTAATAGCATAAGGTCCTGGAAGACAAAGGTGTTGTAGATTACCTGATGTCCAAATAGGAGGTAATAGAATACGGTCCTGGAAGAGAGGGCTGTAAATTACCCGATGTCAAAATAGGAGGTAATAGAATAAGGTCCTGGAGGAGAGGGCTGTAGATTACCTGATGT\t*\tSA:Z:chr4,188507694,-,229M206S,60,22;chr4_KI270789v1_alt,167965,-,122M60I253M,60,62;\tMD:Z:16T99T42A29T6C19C36\tRG:Z:GATKSVContigAlignments\tNM:i:6\tAS:i:223\tXS:i:157", true);
+        final AlignmentInterval two = SVTestUtils.fromSAMRecordString("asm008084:tig00048\t2064\tchr20\t188507694\t60\t229M206H\t*\t0\t0\tGTTGTAGATTAACTGATGTCCAAATAGGAGGAAATAGCATAAGATCATGGAAGAGAGAGGGCAGTAGATTACCTGATGTCGAAATAGCAGGTAAGAGCATACTGTCCTGGAAGAGAGGGCTGTAGATTACCTGATGTCCAAATAGTAGGTAATATCGTAATGTGCTGGAAGAGAGAGGGCTTTAGATTACCTGATGTCCAAATAGGAGGAAATAGCATAAGGTCCTGGA\t*\tSA:Z:chr4,188506254,-,182S253M,60,6;chr4_KI270789v1_alt,167965,-,122M60I253M,60,62;\tMD:Z:11C5A4G24C32C13T6A31G11G8G0G0A3G2C0A1T1G12G19G7T3C0A14\tRG:Z:GATKSVContigAlignments\tNM:i:22\tAS:i:119\tXS:i:58", true);
+        final AlignmentInterval three = SVTestUtils.fromSAMRecordString("asm008084:tig00048\t2064\tchr4_KI270789v1_alt\t167965\t60\t122M60I253M\t*\t0\t0\tGTTGTAGATTAACTGATGTCCAAATAGGAGGAAATAGCATAAGATCATGGAAGAGAGAGGGCAGTAGATTACCTGATGTCGAAATAGCAGGTAAGAGCATACTGTCCTGGAAGAGAGGGCTGTAGATTACCTGATGTCCAAATAGTAGGTAATATCGTAATGTGCTGGAAGAGAGAGGGCTTTAGATTACCTGATGTCCAAATAGGAGGAAATAGCATAAGGTCCTGGAGGACAAAGGTGTTGTAGATTACATGATGTCCAAATAGGACGTAATAGCATAAGGTCCTGGAAGACAAAGGTGTTGTAGATTACCTGATGTCCAAATAGGAGGTAATAGAATACGGTCCTGGAAGAGAGGGCTGTAAATTACCCGATGTCAAAATAGGAGGTAATAGAATAAGGTCCTGGAGGAGAGGGCTGTAGATTACCTGATGT\t*\tSA:Z:chr4,188506254,-,182S253M,60,6;chr4,188507694,-,229M206S,60,22;\tMD:Z:311T6C56\tRG:Z:GATKSVContigAlignments\tNM:i:62\tAS:i:289\tXS:i:223", true);
+        data.add(new Object[]{Arrays.asList(one, two, three), 223, three});
+
+        final AlignmentInterval normalOne = SVTestUtils.fromSAMRecordString("asm000012:tig00003\t2048\tchr1\t933803\t60\t317M302H\t*\t0\t0\tTCCTGGAAGGTTTAGAGCCCAGCCTGGGAGTCTTTGGTGCTGAAACGGATCTGCTTAGGGGCAGCCTTGGATTAGCCCAGCTCCAGCCAGCCCAGGTCAGGGGAGCCGGGAGCTATTTAACGAGGTTTAGGGTAGGCTCCCAGGTCACTGCGCAGGACTGCTCCGTTACAGGTGGGCAGGGGAGGCTGCTCCGTTACAGGTGGGCAGGGGAGGCGGCTCCGTTACAGGTGGGCAGGGGAGGCGGCTGCGTTACAGGTGTGCAGGGGAGGCGGCTGCGTTACAGGTGGGCGGGGGAGGCGGCTGCGTTACAGGTGGGC\t*\tSA:Z:chr1,934806,+,163S456M,60,8;\tMD:Z:140T45G3G27G39G30A12C14\tRG:Z:GATKSVContigAlignments\tNM:i:7\tAS:i:282\tXS:i:0", true);
+        final AlignmentInterval normalTwo = SVTestUtils.fromSAMRecordString("asm000012:tig00003\t0\tchr1\t934806\t60\t163S456M\t*\t0\t0\tTCCTGGAAGGTTTAGAGCCCAGCCTGGGAGTCTTTGGTGCTGAAACGGATCTGCTTAGGGGCAGCCTTGGATTAGCCCAGCTCCAGCCAGCCCAGGTCAGGGGAGCCGGGAGCTATTTAACGAGGTTTAGGGTAGGCTCCCAGGTCACTGCGCAGGACTGCTCCGTTACAGGTGGGCAGGGGAGGCTGCTCCGTTACAGGTGGGCAGGGGAGGCGGCTCCGTTACAGGTGGGCAGGGGAGGCGGCTGCGTTACAGGTGTGCAGGGGAGGCGGCTGCGTTACAGGTGGGCGGGGGAGGCGGCTGCGTTACAGGTGGGCGGGCGGTGCTGCAGGAGGACTGCTCAGGGAGTGGCGCCTGGACCCTGAGCCCCTTCTCTGCTGACTGGGGAGAGGCTCACGGAACCGGGAAGGGGTGGAGGGCCGTGCTCCACACAGTTCGTCTCATTGCTCTCTGGGACTCTGTGGATGTGGGATTGGGCTGAATTAGCAAGAAGAGGAGAAATGAGGGAAGAAAAGAGTTAAATGCATGTTGATTCCAAGCCCCCGCCTGCCGGGGGGACAGCGGGAGGTTGGAGCACGCAGCCCTGGTGCCTGGTGCGAGCTGCACGTGTCTGCCGGTG\t*\tSA:Z:chr1,933803,+,317M302S,60,7;\tMD:Z:14G8G18G12G14G24G2G32G324\tRG:Z:GATKSVContigAlignments\tNM:i:8\tAS:i:416\tXS:i:147", true);
+        data.add(new Object[]{Arrays.asList(normalOne, normalTwo), 416, null});
+        return data.toArray(new Object[data.size()][]);
+    }
+
+    @Test(groups = "sv", dataProvider = "forTestSpecialChanelForSingleNonCanonicalMappings")
+    public void testSpecialChanelForSingleNonCanonicalMappings(final List<AlignmentInterval> configuration,
+                                                               final int maxCanonicalAS,
+                                                               final AlignmentInterval expectedOutput) {
+        final AlignmentInterval result = AssemblyContigAlignmentsConfigPicker.specialChanelForSingleNonCanonicalMappings(
+                b38_canonicalChromosomes, configuration, maxCanonicalAS);
+        Assert.assertEquals(result, expectedOutput);
     }
 }
