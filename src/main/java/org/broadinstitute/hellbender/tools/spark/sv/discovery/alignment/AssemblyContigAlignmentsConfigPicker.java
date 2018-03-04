@@ -24,8 +24,22 @@ import static org.broadinstitute.hellbender.tools.spark.sv.StructuralVariationDi
 
 public class AssemblyContigAlignmentsConfigPicker {
 
-    public static final int ALIGNMENT_MAPQUAL_THREHOLD = 20;
-    public static final int ALIGNMENT_READSPAN_THRESHOLD = 10;
+    /**
+     * A filter that is used to remove contigs upfront which doesn't meet the following criteria
+     * either:
+     *  has only 1 mapping, with MQ strictly above this threshold
+     * or:
+     *  has more than 1 mappings, but only 1 mapping has MQ strictly above this threshold and it has a large gap in it.
+     */
+    static final int ALIGNMENT_MQ_THRESHOLD = 20;
+
+    /**
+     * A filter to boost configuration scoring implemented here:
+     * if the configuration has more than 10 mappings, then
+     * any mappings in such configuration with MQ
+     * not strictly above this threshold is classified as bad and filtered.
+     */
+    static final int ALIGNMENT_MQ_THRESHOLD_FOR_SPEED_BOOST = 10;
 
     /**
      * Filters an input of SAM file containing alignments of a single-ended long read that
@@ -39,6 +53,7 @@ public class AssemblyContigAlignmentsConfigPicker {
      *
      * @return              contigs with alignments filtered and custom formatted as {@link AlignmentInterval}
      */
+    // TODO: 3/1/18 change interface here: not to return AlignedContig, but return AssemblyContigWithFineTunedAlignments
     public static JavaRDD<AlignedContig> createOptimalCoverageAlignmentSetsForContigs(final JavaRDD<GATKRead> assemblyAlignments,
                                                                                       final SAMFileHeader header,
                                                                                       final String nonCanonicalContigNamesFile,
@@ -56,10 +71,11 @@ public class AssemblyContigAlignmentsConfigPicker {
 
     /**
      * Parses input alignments into custom {@link AlignmentInterval} format, and
-     * performs a primitive filtering on the contigs implemented in
+     * performs a primitive filtering implemented in
      * {@link #notDiscardForBadMQ(AlignedContig)} that
      * gets rid of contigs with no good alignments.
      */
+    // TODO: 3/1/18 change interface here: not to return AlignedContig, but return AssemblyContigWithFineTunedAlignments
     private static JavaRDD<AlignedContig> convertRawAlignmentsToAlignedContigAndFilterByQuality(final JavaRDD<GATKRead> assemblyAlignments,
                                                                                                 final SAMFileHeader header,
                                                                                                 final Logger toolLogger) {
@@ -78,21 +94,24 @@ public class AssemblyContigAlignmentsConfigPicker {
 
     /**
      * Idea is to keep mapped contig that
-     *  either has at least two alignments over {@link #ALIGNMENT_MAPQUAL_THREHOLD},
-     *  or in the case of a single alignment, it must be MQ > {@link #ALIGNMENT_MAPQUAL_THREHOLD}.
+     *  either has at least two alignments over {@link #ALIGNMENT_MQ_THRESHOLD},
+     *  or in the case of a single alignment, it must be MQ > {@link #ALIGNMENT_MQ_THRESHOLD}.
      * Note that we are not simply filtering out contigs with only 1 alignment because
      * they might contain large (> 50) gaps hence should be kept.
      *
-     * todo:
+     * a point that could use improvements:
      *   the current implementation exhaustively checks the power set of all possible alignments of each assembly contig,
      *   which is computationally impossible for contigs having many-but-barely-any-good alignments, yet bringing in no value,
      *   hence this primitive filtering step to get rid of these bad assembly contigs.
      */
     private static boolean notDiscardForBadMQ(final AlignedContig contig) {
         if (contig.alignmentIntervals.size() < 2 ) {
-            return (!contig.alignmentIntervals.isEmpty()) && contig.alignmentIntervals.get(0).mapQual > ALIGNMENT_MAPQUAL_THREHOLD;
+            return (!contig.alignmentIntervals.isEmpty()) && contig.alignmentIntervals.get(0).mapQual > ALIGNMENT_MQ_THRESHOLD;
         } else {
-            return contig.alignmentIntervals.stream().mapToInt(ai -> ai.mapQual).filter(mq -> mq > ALIGNMENT_MAPQUAL_THREHOLD).count() > 1;
+            // TODO: 3/1/18 a bug is present here that even though only one alignment has not-bad MQ, it could contain a large gap, currently it is being filtered away;
+            //      we should keep the single not-bad mapping and mark the others as bad;
+            //      note that a follow up fix in AssemblyContigAlignmentSignatureClassifier to classify such contigs not as incomplete
+            return contig.alignmentIntervals.stream().mapToInt(ai -> ai.mapQual).filter(mq -> mq > ALIGNMENT_MQ_THRESHOLD).count() > 1;
         }
     }
 
@@ -176,12 +195,13 @@ public class AssemblyContigAlignmentsConfigPicker {
 
         // speed up if number of alignments is too high (>10)
         // if mapped to canonical chromosomes, MQ must be >10; otherwise, must have AS higher than max canonical aligner score
+        // TODO: 3/1/18 should keep the bad ones and save them in the returned value
         final List<AlignmentInterval> alignmentIntervals;
         if (alignedContig.alignmentIntervals.size() > 10) {
             alignmentIntervals = alignedContig.alignmentIntervals.stream()
                     .filter(alignmentInterval -> (!canonicalChromosomes.contains(alignmentInterval.referenceSpan.getContig())
                                                                            && alignmentInterval.alnScore > maxCanonicalChrAlignerScore)
-                                                 || alignmentInterval.mapQual>10)
+                                                 || alignmentInterval.mapQual > ALIGNMENT_MQ_THRESHOLD_FOR_SPEED_BOOST)
                     .collect(Collectors.toList());
         } else {
             alignmentIntervals = alignedContig.alignmentIntervals;
@@ -285,7 +305,7 @@ public class AssemblyContigAlignmentsConfigPicker {
                             new AlignedContig(contigName, contigSeq, splitGaps(configuration),
                                     true))
                     .sorted(sortConfigurations())
-                    .collect(Collectors.toList()).iterator();
+                    .iterator();
         } else {
             return Collections.singletonList(
                     new AlignedContig(contigName, contigSeq, splitGaps(bestConfigurations.get(0)),
@@ -295,8 +315,10 @@ public class AssemblyContigAlignmentsConfigPicker {
     }
 
     /**
-     * when two configurations are the same, prefer the one with less alignments,
-     * or less summed mismatches if still tie.
+     * when two configurations are the same,
+     * put the one with less alignments,
+     * or less summed mismatches if still tie
+     * first
      */
     private static Comparator<AlignedContig> sortConfigurations() {
         final Comparator<AlignedContig> numFirst
@@ -310,6 +332,7 @@ public class AssemblyContigAlignmentsConfigPicker {
     @VisibleForTesting
     static List<AlignmentInterval> splitGaps(final List<AlignmentInterval> configuration) {
 
+        // TODO: 3/1/18 don't ditch the bad ones, instead save them, but mark accordingly
         // 1st pass, split gapped alignments when available
         final List<Iterable<AlignmentInterval>> alignmentSplitChildren =
                 configuration.stream()
@@ -394,4 +417,7 @@ public class AssemblyContigAlignmentsConfigPicker {
         }
     }
 
+    // TODO: 3/1/18 implement another simple fix that classify contigs with the following signature as ambiguous
+    // one configuration with single good mapping to non-canonical chromosome,
+    // another configuration with split alignments to canonical chromosomes
 }

@@ -5,7 +5,6 @@ import htsjdk.samtools.SAMSequenceDictionary;
 import org.apache.logging.log4j.Logger;
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.broadcast.Broadcast;
-import org.broadinstitute.hellbender.engine.datasources.ReferenceMultiSource;
 import org.broadinstitute.hellbender.tools.spark.sv.discovery.alignment.*;
 import org.broadinstitute.hellbender.tools.spark.sv.utils.RDDUtils;
 import org.broadinstitute.hellbender.utils.SimpleInterval;
@@ -16,6 +15,9 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 public final class AssemblyContigAlignmentSignatureClassifier {
+
+    static final int ALIGNMENT_MAPQUAL_THREHOLD = 20;
+    static final int ALIGNMENT_READSPAN_THRESHOLD = 10;
 
     public enum RawTypes {
         InsDel,                 // 2 alignments, indicating ins/del, simple duplication expansion/contractions
@@ -44,7 +46,7 @@ public final class AssemblyContigAlignmentSignatureClassifier {
         final EnumMap<RawTypes, JavaRDD<AssemblyContigWithFineTunedAlignments>> contigsByRawTypesFromMultiAlignment = new EnumMap<>(RawTypes.class);
         final MultipleAlignmentReclassificationResults multipleAlignmentReclassificationResults =
                 reClassifyContigsWithMultipleAlignments(moreThanTwoAlignments,
-                        AssemblyContigAlignmentsConfigPicker.ALIGNMENT_MAPQUAL_THREHOLD, AssemblyContigAlignmentsConfigPicker.ALIGNMENT_READSPAN_THRESHOLD);
+                        ALIGNMENT_MAPQUAL_THREHOLD, ALIGNMENT_READSPAN_THRESHOLD);
         contigsByRawTypesFromMultiAlignment.put(RawTypes.MisAssemblySuspect,
                 multipleAlignmentReclassificationResults.nonInformativeContigs);
         contigsByRawTypesFromMultiAlignment.put(RawTypes.Incomplete,
