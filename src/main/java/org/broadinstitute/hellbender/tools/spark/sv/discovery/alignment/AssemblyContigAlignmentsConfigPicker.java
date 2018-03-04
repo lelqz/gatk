@@ -113,9 +113,6 @@ public class AssemblyContigAlignmentsConfigPicker {
         if (contig.alignmentIntervals.size() < 2 ) {
             return (!contig.alignmentIntervals.isEmpty()) && contig.alignmentIntervals.get(0).mapQual > ALIGNMENT_MQ_THRESHOLD;
         } else {
-            // TODO: 3/1/18 a bug is present here that even though only one alignment has not-bad MQ, it could contain a large gap, currently it is being filtered away;
-            //      we should keep the single not-bad mapping and mark the others as bad;
-            //      note that a follow up fix in AssemblyContigAlignmentSignatureClassifier to classify such contigs not as incomplete
             int count = 0;
             for (final AlignmentInterval alignment : contig.alignmentIntervals) {
                 if (alignment.mapQual > ALIGNMENT_MQ_THRESHOLD) {

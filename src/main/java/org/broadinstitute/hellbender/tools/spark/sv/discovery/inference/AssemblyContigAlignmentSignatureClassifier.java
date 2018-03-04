@@ -504,4 +504,8 @@ public final class AssemblyContigAlignmentSignatureClassifier {
 
     // TODO: 11/17/17 salvation on assembly contigs that 1) has ambiguous "best" configuration, and 2) has incomplete picture; and flag accordingly
 
+    // TODO: 3/4/18 a bug is present here that even though only one alignment has not-bad MQ, it could contain a large gap,
+    //      depending on the behavior of the other gap-less bad mappings,
+    //      we may end up classifying the whole contig as incomplete, or signal-less,
+    //      we should keep the single not-bad mapping and annotate accordingly
 }
