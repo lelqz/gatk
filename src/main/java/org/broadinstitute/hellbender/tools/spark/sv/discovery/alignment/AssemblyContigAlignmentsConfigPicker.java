@@ -104,14 +104,23 @@ public class AssemblyContigAlignmentsConfigPicker {
      *   which is computationally impossible for contigs having many-but-barely-any-good alignments, yet bringing in no value,
      *   hence this primitive filtering step to get rid of these bad assembly contigs.
      */
-    private static boolean notDiscardForBadMQ(final AlignedContig contig) {
+    @VisibleForTesting
+    static boolean notDiscardForBadMQ(final AlignedContig contig) {
         if (contig.alignmentIntervals.size() < 2 ) {
             return (!contig.alignmentIntervals.isEmpty()) && contig.alignmentIntervals.get(0).mapQual > ALIGNMENT_MQ_THRESHOLD;
         } else {
             // TODO: 3/1/18 a bug is present here that even though only one alignment has not-bad MQ, it could contain a large gap, currently it is being filtered away;
             //      we should keep the single not-bad mapping and mark the others as bad;
             //      note that a follow up fix in AssemblyContigAlignmentSignatureClassifier to classify such contigs not as incomplete
-            return contig.alignmentIntervals.stream().mapToInt(ai -> ai.mapQual).filter(mq -> mq > ALIGNMENT_MQ_THRESHOLD).count() > 1;
+            int count = 0;
+            for (final AlignmentInterval alignment : contig.alignmentIntervals) {
+                if (alignment.mapQual > ALIGNMENT_MQ_THRESHOLD) {
+                    if (alignmentContainsLargeGap(alignment))
+                        return true;
+                    ++count;
+                }
+            }
+            return count > 1; // either more than 1 non-bad mappings, or at least 1 non-bad mapping containing large gap
         }
     }
 
