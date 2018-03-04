@@ -1,5 +1,6 @@
 package org.broadinstitute.hellbender.tools.spark.sv.discovery.alignment;
 
+import com.google.common.collect.Lists;
 import htsjdk.samtools.TextCigarCodec;
 import org.apache.commons.collections4.IterableUtils;
 import org.broadinstitute.hellbender.GATKBaseTest;
@@ -16,6 +17,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import static org.broadinstitute.hellbender.tools.spark.sv.StructuralVariationDiscoveryArgumentCollection.DiscoverVariantsFromContigsAlignmentsSparkArgumentCollection.GAPPED_ALIGNMENT_BREAK_DEFAULT_SENSITIVITY;
 import static org.broadinstitute.hellbender.tools.spark.sv.discovery.SVTestUtils.fromPrimarySAMRecordString;
 import static org.broadinstitute.hellbender.tools.spark.sv.discovery.SVTestUtils.makeDummySequence;
 import static org.broadinstitute.hellbender.tools.spark.sv.discovery.SimpleSVDiscoveryTestDataProvider.b38_canonicalChromosomes;
@@ -84,14 +86,14 @@ public class AssemblyContigAlignmentsConfigPickerUnitTest extends GATKBaseTest {
         assertEquals(AssemblyContigAlignmentsConfigPicker.pickBestConfigurations(contig, b38_canonicalChromosomes, 0.0).size(), expectedConfigurationCount);
 
         if (expectedConfigurationCount == 1) {
-            final AlignedContig tig =
-                    AssemblyContigAlignmentsConfigPicker.filterAndSplitGappedAlignmentInterval(
-                            SparkContextFactory.getTestSparkContext().parallelize(Collections.singletonList(contig)),
-                            null, b38_seqDict, 0.0).collect().get(0);
-            assertEquals(tig.alignmentIntervals.size(), expectedAICount,
-                    tig.alignmentIntervals.stream().map(AlignmentInterval::toPackedString).collect(Collectors.toList()).toString());
-        }
 
+            final List<AlignmentInterval> alignments = AssemblyContigAlignmentsConfigPicker.gatherBestConfigurationsForOneContig(
+                    SparkContextFactory.getTestSparkContext().parallelize(Collections.singletonList(contig))
+                    , null, b38_seqDict, 0.0
+            ).values().collect().get(0).get(0).goodMappings;
+            assertEquals(alignments.size(), expectedAICount,
+                    alignments.stream().map(AlignmentInterval::toPackedString).collect(Collectors.toList()).toString());
+        }
     }
 
 
@@ -104,16 +106,21 @@ public class AssemblyContigAlignmentsConfigPickerUnitTest extends GATKBaseTest {
         final AlignmentInterval alignmentTwo = new AlignmentInterval(new SimpleInterval("chr17", 26962248, 26962806),
                 483, 1103, CigarUtils.invertCigar(TextCigarCodec.decode("121M1D142M1I165M62I130M482S")), false, 60, 97, 281, ContigAlignmentsModifier.AlnModType.NONE);
 
-        data.add(new Object[]{Arrays.asList(alignmentOne, alignmentTwo), Collections.singletonList(alignmentOne)});
+        final Iterable<AlignmentInterval> split = ContigAlignmentsModifier.splitGappedAlignment(alignmentTwo, GAPPED_ALIGNMENT_BREAK_DEFAULT_SENSITIVITY, 1103);
+        data.add(new Object[]{
+                new AssemblyContigAlignmentsConfigPicker.GoodAndBadMappings(Arrays.asList(alignmentOne, alignmentTwo), Collections.emptyList()),
+                new AssemblyContigAlignmentsConfigPicker.GoodAndBadMappings(Collections.singletonList(alignmentOne), Lists.newArrayList(split))
+        });
 
         return data.toArray(new Object[data.size()][]);
     }
 
     @Test(dataProvider = "gapSplitFineTuning", groups = "sv")
-    public void testGapSplit(final List<AlignmentInterval> inputConfiguration, final List<AlignmentInterval> expectedOutputConfiguration) {
+    public void testGapSplit(final AssemblyContigAlignmentsConfigPicker.GoodAndBadMappings inputConfiguration,
+                             final AssemblyContigAlignmentsConfigPicker.GoodAndBadMappings expectedOutputConfiguration) {
 
-        final List<AlignmentInterval> alignmentIntervals = AssemblyContigAlignmentsConfigPicker.splitGaps(inputConfiguration);
-        Assert.assertEquals(alignmentIntervals, expectedOutputConfiguration);
+        final AssemblyContigAlignmentsConfigPicker.GoodAndBadMappings configuration = AssemblyContigAlignmentsConfigPicker.splitGaps(inputConfiguration);
+        Assert.assertEquals(configuration, expectedOutputConfiguration);
     }
 
     @Test(groups = "sv")

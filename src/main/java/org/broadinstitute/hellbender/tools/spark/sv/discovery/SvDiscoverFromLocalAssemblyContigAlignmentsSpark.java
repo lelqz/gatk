@@ -171,11 +171,11 @@ public final class SvDiscoverFromLocalAssemblyContigAlignmentsSpark extends GATK
         final Logger toolLogger = svDiscoveryInputData.toolLogger;
 
         // filter alignments and split the gaps, hence the name "reconstructed"
-        final JavaRDD<AlignedContig> contigsWithChimericAlignmentsReconstructed =
+        final JavaRDD<AssemblyContigWithFineTunedAlignments> contigsWithChimericAlignmentsReconstructed =
                 AssemblyContigAlignmentsConfigPicker
                         .createOptimalCoverageAlignmentSetsForContigs(assemblyRawAlignments, headerBroadcast.getValue(),
                                 nonCanonicalChromosomeNamesFile, 0.0, toolLogger)
-                        .filter(AlignedContig::isInformative).cache();
+                        .filter(AssemblyContigWithFineTunedAlignments::isInformative).cache();
         toolLogger.info( contigsWithChimericAlignmentsReconstructed.count() +
                 " contigs with chimeric alignments potentially giving SV signals.");
 

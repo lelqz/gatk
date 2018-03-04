@@ -29,13 +29,13 @@ public final class AssemblyContigAlignmentSignatureClassifier {
         MisAssemblySuspect;     // suspected to be misassembly due to alignment signature that despite multiple alignments, no or only 1 good alignment
     }
 
-    public static EnumMap<RawTypes, JavaRDD<AssemblyContigWithFineTunedAlignments>> classifyContigs(final JavaRDD<AlignedContig> contigs,
+    public static EnumMap<RawTypes, JavaRDD<AssemblyContigWithFineTunedAlignments>> classifyContigs(final JavaRDD<AssemblyContigWithFineTunedAlignments> contigs,
                                                                                                     final Broadcast<SAMSequenceDictionary> broadcastSequenceDictionary,
                                                                                                     final Logger toolLogger) {
 
         // long reads with only 1 best configuration
         final JavaRDD<AlignedContig> contigsWithOnlyOneBestConfig =
-                contigs.filter(lr -> !lr.hasEquallyGoodAlnConfigurations).cache();
+                contigs.map(AssemblyContigWithFineTunedAlignments::getSourceContig).filter(lr -> !lr.hasEquallyGoodAlnConfigurations).cache();
 
         // primary split between 2 vs more than 2 alignments
         final Tuple2<JavaRDD<AlignedContig>, JavaRDD<AlignedContig>> twoAlignmentsOrMore =
@@ -68,7 +68,7 @@ public final class AssemblyContigAlignmentSignatureClassifier {
         // TODO: 11/21/17 later we may decide to salvage ambiguous contigs with some heuristic logic, but later
         // long reads with more than 1 best configurations, i.e. ambiguous raw types
         final JavaRDD<AssemblyContigWithFineTunedAlignments> ambiguous =
-                contigs.filter(tig -> tig.hasEquallyGoodAlnConfigurations).map(AssemblyContigWithFineTunedAlignments::new);
+                contigs.map(AssemblyContigWithFineTunedAlignments::getSourceContig).filter(tig -> tig.hasEquallyGoodAlnConfigurations).map(AssemblyContigWithFineTunedAlignments::new);
         result.put(RawTypes.Ambiguous, ambiguous);
 
         return result;

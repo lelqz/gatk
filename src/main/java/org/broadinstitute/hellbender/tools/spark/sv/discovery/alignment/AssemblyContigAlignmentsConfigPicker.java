@@ -2,10 +2,12 @@ package org.broadinstitute.hellbender.tools.spark.sv.discovery.alignment;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Iterables;
+import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import htsjdk.samtools.SAMFileHeader;
 import htsjdk.samtools.SAMSequenceDictionary;
 import org.apache.logging.log4j.Logger;
+import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
 import org.broadinstitute.hellbender.exceptions.GATKException;
 import org.broadinstitute.hellbender.tools.spark.sv.discovery.SvDiscoverFromLocalAssemblyContigAlignmentsSpark;
@@ -53,18 +55,21 @@ public class AssemblyContigAlignmentsConfigPicker {
      *
      * @return              contigs with alignments filtered and custom formatted as {@link AlignmentInterval}
      */
-    // TODO: 3/1/18 change interface here: not to return AlignedContig, but return AssemblyContigWithFineTunedAlignments
-    public static JavaRDD<AlignedContig> createOptimalCoverageAlignmentSetsForContigs(final JavaRDD<GATKRead> assemblyAlignments,
-                                                                                      final SAMFileHeader header,
-                                                                                      final String nonCanonicalContigNamesFile,
-                                                                                      final Double scoreDiffTolerance,
-                                                                                      final Logger toolLogger) {
+    public static JavaRDD<AssemblyContigWithFineTunedAlignments> createOptimalCoverageAlignmentSetsForContigs(final JavaRDD<GATKRead> assemblyAlignments,
+                                                                                                              final SAMFileHeader header,
+                                                                                                              final String nonCanonicalContigNamesFile,
+                                                                                                              final Double scoreDiffTolerance,
+                                                                                                              final Logger toolLogger) {
 
         final JavaRDD<AlignedContig> parsedContigAlignments =
                 convertRawAlignmentsToAlignedContigAndFilterByQuality(assemblyAlignments, header, toolLogger);
 
-        return filterAndSplitGappedAlignmentInterval(parsedContigAlignments, nonCanonicalContigNamesFile,
-                                      header.getSequenceDictionary(), scoreDiffTolerance);
+        final JavaPairRDD<Tuple2<String, byte[]>, List<GoodAndBadMappings>> assemblyContigWithPickedConfigurations =
+                gatherBestConfigurationsForOneContig(parsedContigAlignments, nonCanonicalContigNamesFile,
+                        header.getSequenceDictionary(), scoreDiffTolerance);
+
+        return assemblyContigWithPickedConfigurations
+                .flatMap(AssemblyContigAlignmentsConfigPicker::reConstructContigFromPickedConfiguration);
     }
 
     //==================================================================================================================
@@ -75,7 +80,6 @@ public class AssemblyContigAlignmentsConfigPicker {
      * {@link #notDiscardForBadMQ(AlignedContig)} that
      * gets rid of contigs with no good alignments.
      */
-    // TODO: 3/1/18 change interface here: not to return AlignedContig, but return AssemblyContigWithFineTunedAlignments
     private static JavaRDD<AlignedContig> convertRawAlignmentsToAlignedContigAndFilterByQuality(final JavaRDD<GATKRead> assemblyAlignments,
                                                                                                 final SAMFileHeader header,
                                                                                                 final Logger toolLogger) {
@@ -127,28 +131,21 @@ public class AssemblyContigAlignmentsConfigPicker {
     //==================================================================================================================
 
     /**
-     * For each assembly contig, scores its alignment configurations and pick the best one(s),
-     * then reconstruct the contig's alignment configuration through {@link #reConstructContigFromPickedConfiguration(Tuple2)}.
-     *
-     * Note that this step is essentially a flatMap operation, meaning that one contig may return 1 or multiple contigs:
-     *  *) when 1 contig is yielded, it means the contig has only 1 configuration that scored the best
-     *  *) when multiple contigs are yielded, it means the contig has several top-scored configurations
-     * How to handle the second scenario can be treated in a separate logic unit.
+     * For each assembly contig, scores its alignment configurations and pick the best one(s).
      */
     @VisibleForTesting
-    static JavaRDD<AlignedContig> filterAndSplitGappedAlignmentInterval(final JavaRDD<AlignedContig> parsedContigAlignments,
-                                                                        final String nonCanonicalContigNamesFile,
-                                                                        final SAMSequenceDictionary dictionary,
-                                                                        final Double scoreDiffTolerance) {
+    static JavaPairRDD<Tuple2<String, byte[]>, List<GoodAndBadMappings>> gatherBestConfigurationsForOneContig(final JavaRDD<AlignedContig> parsedContigAlignments,
+                                                                                                              final String nonCanonicalContigNamesFile,
+                                                                                                              final SAMSequenceDictionary dictionary,
+                                                                                                              final Double scoreDiffTolerance) {
 
         final Set<String> canonicalChromosomes = SvDiscoveryUtils.getCanonicalChromosomes(nonCanonicalContigNamesFile, dictionary);
 
         return parsedContigAlignments
                 .mapToPair(alignedContig -> new Tuple2<>(new Tuple2<>(alignedContig.contigName,alignedContig.contigSequence),
-                                pickBestConfigurations(alignedContig, canonicalChromosomes, scoreDiffTolerance)))
-                .map(nameSeqAndConfigurations -> new Tuple2<>(nameSeqAndConfigurations._1, breakTieByPreferringLessAlignments(nameSeqAndConfigurations._2, 0)))
-                .map(nameSeqAndConfigurations -> new Tuple2<>(nameSeqAndConfigurations._1, nameSeqAndConfigurations._2.stream().map(r -> r.goodMappings).collect(Collectors.toList()))) // todo temporary, later need to change interface of the next map
-                .flatMap(AssemblyContigAlignmentsConfigPicker::reConstructContigFromPickedConfiguration);
+                        pickBestConfigurations(alignedContig, canonicalChromosomes, scoreDiffTolerance)))
+                .mapToPair(nameSeqAndConfigurations -> new Tuple2<>(nameSeqAndConfigurations._1,
+                        breakTieByPreferringLessAlignments(nameSeqAndConfigurations._2, 0)));
     }
 
     /**
@@ -202,26 +199,17 @@ public class AssemblyContigAlignmentsConfigPicker {
                 .filter(alignmentInterval -> canonicalChromosomes.contains(alignmentInterval.referenceSpan.getContig()))
                 .mapToInt(ai -> ai.alnScore).max().orElse(0); // possible that no mapping to canonical chromosomes
 
-        // speed up if number of alignments is too high (>10)
-        // if mapped to canonical chromosomes, MQ must be >10; otherwise, must have AS higher than max canonical aligner score
-        // TODO: 3/1/18 should keep the bad ones and save them in the returned value
-        final List<AlignmentInterval> alignmentIntervals;
-        if (alignedContig.alignmentIntervals.size() > 10) {
-            alignmentIntervals = alignedContig.alignmentIntervals.stream()
-                    .filter(alignmentInterval -> (!canonicalChromosomes.contains(alignmentInterval.referenceSpan.getContig())
-                                                                           && alignmentInterval.alnScore > maxCanonicalChrAlignerScore)
-                                                 || alignmentInterval.mapQual > ALIGNMENT_MQ_THRESHOLD_FOR_SPEED_BOOST)
-                    .collect(Collectors.toList());
-        } else {
-            alignmentIntervals = alignedContig.alignmentIntervals;
-        }
+        final GoodAndBadMappings preFilteredAlignments =
+                speedUpWhenTooManyMappings(alignedContig, canonicalChromosomes, maxCanonicalChrAlignerScore);
+        final List<AlignmentInterval> goodMappings = preFilteredAlignments.goodMappings;
+        final List<AlignmentInterval> badMappings = preFilteredAlignments.badMappings;
 
-        final int newMaxCanonicalChrAlignerScore = alignmentIntervals.stream()
+        final int newMaxCanonicalChrAlignerScore = goodMappings.stream()
                 .filter(alignmentInterval -> canonicalChromosomes.contains(alignmentInterval.referenceSpan.getContig()))
                 .mapToInt(ai -> ai.alnScore).max().orElse(0); // possible that no mapping to canonical chromosomes
 
         // group 2: generate, and score configurations
-        final List<List<AlignmentInterval>> allConfigurations = Sets.powerSet(new HashSet<>(alignmentIntervals))
+        final List<List<AlignmentInterval>> allConfigurations = Sets.powerSet(new HashSet<>(goodMappings))
                 .stream().map(ArrayList::new)
                 // make sure within each configuration, alignments would be sorted as they would be in a corresponding AlignedContig
                 .map(ls -> ls.stream().sorted(AlignedContig.getAlignmentIntervalComparator()).collect(Collectors.toList()))
@@ -245,12 +233,39 @@ public class AssemblyContigAlignmentsConfigPicker {
                     return s >= maxScore || maxScore - s <= tol;
                 })
                 .mapToObj(p -> {
-                    final ArrayList<AlignmentInterval> copy = new ArrayList<>(alignmentIntervals);
+                    final ArrayList<AlignmentInterval> copy = new ArrayList<>(goodMappings);
                     final List<AlignmentInterval> pickedAlignments = allConfigurations.get(p);
                     copy.removeAll(pickedAlignments); // remove picked, left are bad
+                    copy.addAll(badMappings); // add original bad mappings
                     return new GoodAndBadMappings(pickedAlignments, copy);
                 })
                 .collect(Collectors.toList());
+    }
+
+    // speed up if number of alignments is too high (>10)
+    // if mapped to canonical chromosomes, MQ must be >10; otherwise, must have AS higher than max canonical aligner score
+    private static GoodAndBadMappings speedUpWhenTooManyMappings(final AlignedContig alignedContig,
+                                                                 final Set<String> canonicalChromosomes,
+                                                                 final int maxCanonicalChrAlignerScore) {
+
+        final List<AlignmentInterval> goods;
+        final List<AlignmentInterval> bads;
+        if (alignedContig.alignmentIntervals.size() > 10) {
+            goods = new ArrayList<>();
+            bads = new ArrayList<>();
+            for(final AlignmentInterval alignment : alignedContig.alignmentIntervals) {
+                final boolean isGood = (!canonicalChromosomes.contains(alignment.referenceSpan.getContig()) && alignment.alnScore > maxCanonicalChrAlignerScore)
+                        || alignment.mapQual > ALIGNMENT_MQ_THRESHOLD_FOR_SPEED_BOOST;
+                if (isGood)
+                    goods.add(alignment);
+                else
+                    bads.add(alignment);
+            }
+        } else {
+            goods = alignedContig.alignmentIntervals;
+            bads = Collections.emptyList();
+        }
+        return new GoodAndBadMappings(goods, bads);
     }
 
     /**
@@ -297,30 +312,41 @@ public class AssemblyContigAlignmentsConfigPicker {
 
     /**
      * Reconstructs (possibly more than one) {@link AlignedContig} based on
-     * the given best-scored configuration(s) in {@code nameSeqAndBestConfigurationsOfOneRead}.
+     * the given best-scored configuration(s) in {@code nameSeqAndBestConfigurationsOfOneAssemblyContig}.
      *
-     * @param nameSeqAndBestConfigurationsOfOneRead the name, sequence, and picked best alignment configuration(s) of an assembly contig
+     * @param nameSeqAndBestConfigurationsOfOneAssemblyContig the name, sequence, and picked best alignment configuration(s) of an assembly contig
      * @return The number of returned contigs will be the same as the given best-scored configurations.
      */
-    private static Iterator<AlignedContig> reConstructContigFromPickedConfiguration(
-            final Tuple2<Tuple2<String, byte[]>, List<List<AlignmentInterval>>> nameSeqAndBestConfigurationsOfOneRead) {
+    private static Iterator<AssemblyContigWithFineTunedAlignments> reConstructContigFromPickedConfiguration(
+            final Tuple2<Tuple2<String, byte[]>, List<GoodAndBadMappings>> nameSeqAndBestConfigurationsOfOneAssemblyContig) {
 
-        final String contigName = nameSeqAndBestConfigurationsOfOneRead._1._1;
-        final byte[] contigSeq = nameSeqAndBestConfigurationsOfOneRead._1._2;
-        final List<List<AlignmentInterval>> bestConfigurations = nameSeqAndBestConfigurationsOfOneRead._2;
+        final String contigName = nameSeqAndBestConfigurationsOfOneAssemblyContig._1._1;
+        final byte[] contigSeq = nameSeqAndBestConfigurationsOfOneAssemblyContig._1._2;
+        final List<GoodAndBadMappings> bestConfigurations = nameSeqAndBestConfigurationsOfOneAssemblyContig._2;
         if (bestConfigurations.size() > 1) { // more than one best configuration
             return bestConfigurations.stream()
-                    .map(configuration ->
-                            new AlignedContig(contigName, contigSeq, splitGaps(configuration),
-                                    true))
+                    .map(configuration -> updateContigMappingsWithGapSplit(contigName, contigSeq, configuration, true))
                     .sorted(sortConfigurations())
                     .iterator();
         } else {
-            return Collections.singletonList(
-                    new AlignedContig(contigName, contigSeq, splitGaps(bestConfigurations.get(0)),
-                            false))
-                    .iterator();
+            return Collections.singletonList(updateContigMappingsWithGapSplit(contigName, contigSeq, bestConfigurations.get(0), false)).iterator();
         }
+    }
+
+    private static AssemblyContigWithFineTunedAlignments updateContigMappingsWithGapSplit(final String contigName, final byte[] contigSeq,
+                                                                                          final GoodAndBadMappings configuration,
+                                                                                          final boolean setResultContigAsAmbigous) {
+        final GoodAndBadMappings goodAndBadMappings;
+        if ( configuration.goodMappings.stream().anyMatch(AssemblyContigAlignmentsConfigPicker::alignmentContainsLargeGap) ) {
+            goodAndBadMappings = splitGaps(configuration);
+        } else {
+            goodAndBadMappings = configuration;
+        }
+
+        return new AssemblyContigWithFineTunedAlignments(
+                new AlignedContig(contigName, contigSeq, goodAndBadMappings.goodMappings, setResultContigAsAmbigous),
+                goodAndBadMappings.badMappings.stream().map(AlignmentInterval::toPackedString).collect(Collectors.toList())
+        );
     }
 
     /**
@@ -329,22 +355,26 @@ public class AssemblyContigAlignmentsConfigPicker {
      * or less summed mismatches if still tie
      * first
      */
-    private static Comparator<AlignedContig> sortConfigurations() {
-        final Comparator<AlignedContig> numFirst
-                = (AlignedContig x, AlignedContig y) -> Integer.compare(x.alignmentIntervals.size(), y.alignmentIntervals.size());
-        final Comparator<AlignedContig> mismatchSecond
-                = (AlignedContig x, AlignedContig y) -> Integer.compare(x.alignmentIntervals.stream().mapToInt(ai -> ai.mismatches).sum(),
-                                                                        y.alignmentIntervals.stream().mapToInt(ai -> ai.mismatches).sum());
+    private static Comparator<AssemblyContigWithFineTunedAlignments> sortConfigurations() {
+        final Comparator<AssemblyContigWithFineTunedAlignments> numFirst
+                = (AssemblyContigWithFineTunedAlignments x, AssemblyContigWithFineTunedAlignments y)
+                -> Integer.compare(x.getSourceContig().alignmentIntervals.size(), y.getSourceContig().alignmentIntervals.size());
+        final Comparator<AssemblyContigWithFineTunedAlignments> mismatchSecond
+                = (AssemblyContigWithFineTunedAlignments x, AssemblyContigWithFineTunedAlignments y)
+                -> Integer.compare(x.getSourceContig().alignmentIntervals.stream().mapToInt(ai -> ai.mismatches).sum(),
+                                   y.getSourceContig().alignmentIntervals.stream().mapToInt(ai -> ai.mismatches).sum());
         return numFirst.thenComparing(mismatchSecond);
     }
 
     @VisibleForTesting
-    static List<AlignmentInterval> splitGaps(final List<AlignmentInterval> configuration) {
+    static GoodAndBadMappings splitGaps(final GoodAndBadMappings configuration) {
 
-        // TODO: 3/1/18 don't ditch the bad ones, instead save them, but mark accordingly
-        // 1st pass, split gapped alignments when available
-        final List<Iterable<AlignmentInterval>> alignmentSplitChildren =
-                configuration.stream()
+        final List<AlignmentInterval> originalBadMappings = configuration.badMappings;
+        final List<AlignmentInterval> scan = configuration.goodMappings;
+
+        // 1st pass, split gapped alignments when available, and all defaults to good
+        final List<Tuple2<Boolean, Iterable<AlignmentInterval>>> alignmentSplitChildren =
+                scan.stream()
                         .map(alignment -> {
                             final Iterable<AlignmentInterval> split;
                             if (alignmentContainsLargeGap(alignment)) {
@@ -353,35 +383,43 @@ public class AssemblyContigAlignmentsConfigPicker {
                             } else {
                                 split = Collections.singletonList(alignment);
                             }
-                            return split;
+                            return new Tuple2<>(true, split);
                         }).collect(Collectors.toList());
 
-        // 2nd pass make a choice between gapped and overlapping alignment (alignments that are not favored has its "2nd" set to null)
-        final int count = configuration.size();
+        // 2nd pass make a choice between gapped and overlapping alignment (alignments that are not favored has its "2nd" set to false)
+        final int count = scan.size();
         for (int i = 0; i < count; ++i) {
-            final AlignmentInterval alignment = configuration.get(i);
-            final Iterable<AlignmentInterval> split = alignmentSplitChildren.get(i);
-            if ( split != null && Iterables.size(split) != 1 ) { // the split could be null (i.e. to be filtered out), or could contain no large gaps (i.e. should not check it)
+            final AlignmentInterval alignment = scan.get(i);
+            final Tuple2<Boolean, Iterable<AlignmentInterval>> split = alignmentSplitChildren.get(i);
+            if ( split._1 && Iterables.size(split._2) != 1 ) { // the split could be already marked bad (i.e. to be filtered out), or could contain no large gaps (i.e. should not check it)
                 for (int j = 0; j < count; ++j) {
-                    final AlignmentInterval other = configuration.get(j);
+                    final AlignmentInterval other = scan.get(j);
                     if (j == i || AlignmentInterval.overlapOnContig(alignment, other) == 0)
                         continue;
 
-                    if ( Utils.stream(split).anyMatch(other::containsOnRead) ) {
+                    if ( Utils.stream(split._2).anyMatch(other::containsOnRead) ) {
                         if ( gappedAlignmentOffersBetterCoverage(alignment, other) ) {
-                            alignmentSplitChildren.set(j, null);
+                            final Iterable<AlignmentInterval> copy = alignmentSplitChildren.get(j)._2;
+                            alignmentSplitChildren.set(j, new Tuple2<>(false, copy));
                         } else {
-                            alignmentSplitChildren.set(i, null);
+                            final Iterable<AlignmentInterval> copy = alignmentSplitChildren.get(i)._2;
+                            alignmentSplitChildren.set(i, new Tuple2<>(false, copy));
                         }
                     }
                 }
             }
         }
 
-        // filter out to-be-removed and done
-        return alignmentSplitChildren.stream()
-                .filter(Objects::nonNull)
-                .flatMap(Utils::stream).collect(Collectors.toList());
+        final List<AlignmentInterval> good = new ArrayList<>();
+        final List<AlignmentInterval> bad = new ArrayList<>(originalBadMappings);
+        for (final Tuple2<Boolean, Iterable<AlignmentInterval>> pair : alignmentSplitChildren) {
+            if (pair._1) {
+                good.addAll( Lists.newArrayList(pair._2) );
+            } else {
+                bad.addAll( Lists.newArrayList(pair._2) );
+            }
+        }
+        return new GoodAndBadMappings(good, bad);
     }
 
     private static boolean alignmentContainsLargeGap(final AlignmentInterval alignment) {
