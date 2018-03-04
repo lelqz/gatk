@@ -224,8 +224,6 @@ public class AssemblyContigAlignmentsConfigPicker {
      * Reconstructs (possibly more than one) {@link AlignedContig} based on
      * the given best-scored configuration(s) in {@code nameSeqAndBestConfigurationsOfOneRead}.
      *
-     * todo: note that alignments with large gaps are split here, but it has been discovered to be wrong to do it here, which would be fixed in the next immediate PR.
-     *
      * @param nameSeqAndBestConfigurationsOfOneRead the name, sequence, and picked best alignment configuration(s) of an assembly contig
      * @return The number of returned contigs will be the same as the given best-scored configurations.
      */
