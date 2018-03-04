@@ -116,9 +116,47 @@ public class AssemblyContigAlignmentsConfigPicker {
         final Set<String> canonicalChromosomes = SvDiscoveryUtils.getCanonicalChromosomes(nonCanonicalContigNamesFile, dictionary);
 
         return parsedContigAlignments
-                .mapToPair(alignedContig -> new Tuple2<>(alignedContig.contigName,
-                        new Tuple2<>(alignedContig.contigSequence, pickBestConfigurations(alignedContig, canonicalChromosomes, scoreDiffTolerance))))
+                .mapToPair(alignedContig -> new Tuple2<>(new Tuple2<>(alignedContig.contigName,alignedContig.contigSequence),
+                                pickBestConfigurations(alignedContig, canonicalChromosomes, scoreDiffTolerance)))
+                .map(nameSeqAndConfigurations -> new Tuple2<>(nameSeqAndConfigurations._1, breakTieByPreferringLessAlignments(nameSeqAndConfigurations._2, 0)))
+                .map(nameSeqAndConfigurations -> new Tuple2<>(nameSeqAndConfigurations._1, nameSeqAndConfigurations._2.stream().map(r -> r.goodMappings).collect(Collectors.toList()))) // todo temporary, later need to change interface of the next map
                 .flatMap(AssemblyContigAlignmentsConfigPicker::reConstructContigFromPickedConfiguration);
+    }
+
+    /**
+     * After configuration scoring and picking, the original alignments can be classified as
+     * good and bad mappings:
+     * good: the ones present the picked configuration
+     * bad: the brings more noise than information,
+     *      they can be turned into string representation following the format as in {@link AlignmentInterval#toPackedString()}
+     */
+    static final class GoodAndBadMappings {
+
+        final List<AlignmentInterval> goodMappings;
+        final List<AlignmentInterval> badMappings;
+
+        GoodAndBadMappings(final List<AlignmentInterval> goodMappings, final List<AlignmentInterval> badMappings) {
+            this.goodMappings = goodMappings;
+            this.badMappings = badMappings;
+        }
+
+        @Override
+        public boolean equals(final Object o) {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+
+            final GoodAndBadMappings that = (GoodAndBadMappings) o;
+
+            if (!goodMappings.equals(that.goodMappings)) return false;
+            return badMappings.equals(that.badMappings);
+        }
+
+        @Override
+        public int hashCode() {
+            int result = goodMappings.hashCode();
+            result = 31 * result + badMappings.hashCode();
+            return result;
+        }
     }
 
     /**
@@ -127,9 +165,9 @@ public class AssemblyContigAlignmentsConfigPicker {
      * @return a 2-D list, where in the case when multiple configurations are equally top-scored, all such configurations are picked up
      */
     @VisibleForTesting
-    static List<List<AlignmentInterval>> pickBestConfigurations(final AlignedContig alignedContig,
-                                                                final Set<String> canonicalChromosomes,
-                                                                final Double scoreDiffTolerance) {
+    static List<GoodAndBadMappings> pickBestConfigurations(final AlignedContig alignedContig,
+                                                           final Set<String> canonicalChromosomes,
+                                                           final Double scoreDiffTolerance) {
 
         // group 1: get max aligner score of mappings to canonical chromosomes and speed up in case of too many mappings
         final int maxCanonicalChrAlignerScore = alignedContig.alignmentIntervals.stream()
@@ -177,7 +215,13 @@ public class AssemblyContigAlignmentsConfigPicker {
                     final Double tol = Math.max(Math.ulp(s), scoreDiffTolerance);
                     return s >= maxScore || maxScore - s <= tol;
                 })
-                .mapToObj(allConfigurations::get).collect(Collectors.toList());
+                .mapToObj(p -> {
+                    final ArrayList<AlignmentInterval> copy = new ArrayList<>(alignmentIntervals);
+                    final List<AlignmentInterval> pickedAlignments = allConfigurations.get(p);
+                    copy.removeAll(pickedAlignments); // remove picked, left are bad
+                    return new GoodAndBadMappings(pickedAlignments, copy);
+                })
+                .collect(Collectors.toList());
     }
 
     /**
@@ -220,6 +264,8 @@ public class AssemblyContigAlignmentsConfigPicker {
         return tigExplainedQual;
     }
 
+    //==================================================================================================================
+
     /**
      * Reconstructs (possibly more than one) {@link AlignedContig} based on
      * the given best-scored configuration(s) in {@code nameSeqAndBestConfigurationsOfOneRead}.
@@ -228,11 +274,11 @@ public class AssemblyContigAlignmentsConfigPicker {
      * @return The number of returned contigs will be the same as the given best-scored configurations.
      */
     private static Iterator<AlignedContig> reConstructContigFromPickedConfiguration(
-            final Tuple2<String, Tuple2<byte[], List<List<AlignmentInterval>>>> nameSeqAndBestConfigurationsOfOneRead) {
+            final Tuple2<Tuple2<String, byte[]>, List<List<AlignmentInterval>>> nameSeqAndBestConfigurationsOfOneRead) {
 
-        final String contigName = nameSeqAndBestConfigurationsOfOneRead._1;
-        final byte[] contigSeq = nameSeqAndBestConfigurationsOfOneRead._2._1;
-        final List<List<AlignmentInterval>> bestConfigurations = nameSeqAndBestConfigurationsOfOneRead._2._2;
+        final String contigName = nameSeqAndBestConfigurationsOfOneRead._1._1;
+        final byte[] contigSeq = nameSeqAndBestConfigurationsOfOneRead._1._2;
+        final List<List<AlignmentInterval>> bestConfigurations = nameSeqAndBestConfigurationsOfOneRead._2;
         if (bestConfigurations.size() > 1) { // more than one best configuration
             return bestConfigurations.stream()
                     .map(configuration ->
@@ -319,6 +365,32 @@ public class AssemblyContigAlignmentsConfigPicker {
             return gapped.alnScore > overlappingNonGapped.alnScore;
         } else {
             return diff > 0;
+        }
+    }
+
+    //==================================================================================================================
+
+    /**
+     * For contigs with more than 1 best-scored configurations as determined by
+     * {@link #pickBestConfigurations(AlignedContig, Set, Double)},
+     * save the contigs that has one and only one configuration that
+     * has all mapping quality strictly above the specified {@code threshold}.
+     * Example:
+     *  if a contig has two equal scored configurations with MQ's {10, 60, 60}, and {60, 60},
+     *  this function will favor/pick the {60, 60} configuration if the threshold is 10,
+     *  hence remove the ambiguity.
+     */
+    @VisibleForTesting
+    static List<GoodAndBadMappings> breakTieByPreferringLessAlignments(
+            final List<GoodAndBadMappings> differentRepresentationsForOneContig,
+            final int threshold) {
+        if ( differentRepresentationsForOneContig.size() == 1) {
+            return differentRepresentationsForOneContig;
+        } else {
+            return
+                    Utils.stream(differentRepresentationsForOneContig)
+                            .filter( rep -> rep.goodMappings.stream().mapToInt(ai -> ai.mapQual).min().orElse(threshold) > threshold )
+                            .collect(Collectors.toList());
         }
     }
 

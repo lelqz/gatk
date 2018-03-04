@@ -1,6 +1,7 @@
 package org.broadinstitute.hellbender.tools.spark.sv.discovery.alignment;
 
 import htsjdk.samtools.TextCigarCodec;
+import org.apache.commons.collections4.IterableUtils;
 import org.broadinstitute.hellbender.GATKBaseTest;
 import org.broadinstitute.hellbender.engine.spark.SparkContextFactory;
 import org.broadinstitute.hellbender.utils.SimpleInterval;
@@ -111,5 +112,37 @@ public class AssemblyContigAlignmentsConfigPickerUnitTest extends GATKBaseTest {
 
         final List<AlignmentInterval> alignmentIntervals = AssemblyContigAlignmentsConfigPicker.splitGaps(inputConfiguration);
         Assert.assertEquals(alignmentIntervals, expectedOutputConfiguration);
+    }
+
+    @Test(groups = "sv")
+    public void testBreakTieByPreferringLessAlignments() {
+
+        AlignmentInterval intervalOne = new AlignmentInterval(
+                new SimpleInterval("chr21", 100000, 100100),
+                1, 100, TextCigarCodec.decode("100M220S"),
+                true, 60, 0, 100, ContigAlignmentsModifier.AlnModType.NONE);
+        AlignmentInterval intervalTwo = new AlignmentInterval(
+                new SimpleInterval("chr21", 100099, 100122),
+                99, 122, TextCigarCodec.decode("98S24M78S"),
+                true, 10, 3, 241, ContigAlignmentsModifier.AlnModType.NONE);
+        AlignmentInterval intervalThree = new AlignmentInterval(
+                new SimpleInterval("chr21", 100121, 100200),
+                122, 200,  TextCigarCodec.decode("222S78M"),
+                true, 60, 0, 78, ContigAlignmentsModifier.AlnModType.NONE);
+
+        final AssemblyContigAlignmentsConfigPicker.GoodAndBadMappings rep1 =
+                new AssemblyContigAlignmentsConfigPicker.GoodAndBadMappings(Arrays.asList(intervalOne, intervalThree),
+                        Collections.singletonList(intervalThree));
+        final AssemblyContigAlignmentsConfigPicker.GoodAndBadMappings rep2 =
+                new AssemblyContigAlignmentsConfigPicker.GoodAndBadMappings(Arrays.asList(intervalOne, intervalTwo, intervalThree),
+                        Collections.emptyList());
+
+        int threshold = 0;
+        List<AssemblyContigAlignmentsConfigPicker.GoodAndBadMappings> result = AssemblyContigAlignmentsConfigPicker.breakTieByPreferringLessAlignments(Arrays.asList(rep1, rep2), threshold);
+        Assert.assertEquals(IterableUtils.size(result), 2);
+
+        threshold = 10;
+        result = AssemblyContigAlignmentsConfigPicker.breakTieByPreferringLessAlignments(Arrays.asList(rep1, rep2), threshold);
+        Assert.assertEquals(IterableUtils.size(result), 1);
     }
 }
